@@ -23,6 +23,7 @@ COPY ./.env.example ./.env
 COPY ./runWithProvider.js ./
 
 COPY ./Docker ./Docker
+COPY ./bot ./bot
 
 RUN chmod +x ./Docker/scripts/* && dos2unix ./Docker/scripts/*
 
@@ -52,6 +53,7 @@ COPY --from=builder /evolution/.env ./.env
 COPY --from=builder /evolution/Docker ./Docker
 COPY --from=builder /evolution/runWithProvider.js ./runWithProvider.js
 COPY --from=builder /evolution/tsup.config.ts ./tsup.config.ts
+COPY --from=builder /evolution/bot ./bot
 
 ENV DOCKER_ENV=true
 
