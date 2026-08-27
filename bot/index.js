@@ -422,12 +422,12 @@ app.post('/webhook', async (req, res) => {
         } else {
           // Plain text fallback matching
           const cleanText = messageText.toLowerCase().trim();
-          if (cleanText.includes('english')) lang = 'English';
-          else if (cleanText.includes('hindi') || cleanText.includes('हिंदी')) lang = 'Hindi';
-          else if (cleanText.includes('telugu') || cleanText.includes('తెలుగు')) lang = 'Telugu';
-          else if (cleanText.includes('tamil') || cleanText.includes('தமிழ்')) lang = 'Tamil';
-          else if (cleanText.includes('punjabi') || cleanText.includes('ਪੰਜਾਬੀ')) lang = 'Punjabi';
-          else if (cleanText.includes('urdu') || cleanText.includes('اردو')) lang = 'Urdu';
+          if (cleanText === '1' || cleanText.includes('english')) lang = 'English';
+          else if (cleanText === '2' || cleanText.includes('hindi') || cleanText.includes('हिंदी')) lang = 'Hindi';
+          else if (cleanText === '3' || cleanText.includes('telugu') || cleanText.includes('తెలుగు')) lang = 'Telugu';
+          else if (cleanText === '4' || cleanText.includes('tamil') || cleanText.includes('தமிழ்')) lang = 'Tamil';
+          else if (cleanText === '5' || cleanText.includes('punjabi') || cleanText.includes('ਪੰਜਾਬੀ')) lang = 'Punjabi';
+          else if (cleanText === '6' || cleanText.includes('urdu') || cleanText.includes('اردو')) lang = 'Urdu';
         }
 
         if (!lang || !locales[lang]) {
@@ -467,10 +467,11 @@ app.post('/webhook', async (req, res) => {
 
       case 'REQUIREMENT_TYPE': {
         let type = '';
-        if (messageText === 'req_distributor' || messageText.toLowerCase().includes('distributor')) type = 'Distributor';
-        else if (messageText === 'req_dealer' || messageText.toLowerCase().includes('dealer')) type = 'Dealer';
-        else if (messageText === 'req_retailer' || messageText.toLowerCase().includes('retailer')) type = 'Retailer';
-        else if (messageText === 'req_personal' || messageText.toLowerCase().includes('personal')) type = 'Personal Use';
+        const cleanMsg = messageText.toLowerCase().trim();
+        if (messageText === 'req_distributor' || cleanMsg.includes('distributor') || cleanMsg === '1') type = 'Distributor';
+        else if (messageText === 'req_dealer' || cleanMsg.includes('dealer') || cleanMsg === '2') type = 'Dealer';
+        else if (messageText === 'req_retailer' || cleanMsg.includes('retailer') || cleanMsg === '3') type = 'Retailer';
+        else if (messageText === 'req_personal' || cleanMsg.includes('personal') || cleanMsg === '4') type = 'Personal Use';
 
         if (!type) {
           // Gracefully fallback: show invalid error and repeat options
@@ -522,10 +523,11 @@ app.post('/webhook', async (req, res) => {
 
       case 'BUSINESS_MENU': {
         let action = '';
-        if (messageText === 'biz_catalogues' || messageText.toLowerCase().includes('catalog')) action = 'catalogues';
-        else if (messageText === 'biz_pricing' || messageText.toLowerCase().includes('pricing') || messageText.toLowerCase().includes('enquiry')) action = 'pricing';
-        else if (messageText === 'biz_sales' || messageText.toLowerCase().includes('sales')) action = 'sales';
-        else if (messageText === 'biz_requirement' || messageText.toLowerCase().includes('submit')) action = 'requirement';
+        const cleanMsg = messageText.toLowerCase().trim();
+        if (messageText === 'biz_catalogues' || cleanMsg.includes('catalog') || cleanMsg === '1') action = 'catalogues';
+        else if (messageText === 'biz_pricing' || cleanMsg.includes('pricing') || cleanMsg.includes('enquiry') || cleanMsg === '2') action = 'pricing';
+        else if (messageText === 'biz_sales' || cleanMsg.includes('sales') || cleanMsg === '3') action = 'sales';
+        else if (messageText === 'biz_requirement' || cleanMsg.includes('submit') || cleanMsg === '4') action = 'requirement';
 
         if (!action) {
           await sendText(phoneNumber, textDict.invalidInput, instanceName);
@@ -593,14 +595,27 @@ app.post('/webhook', async (req, res) => {
 
       case 'PRODUCT_CATALOGUES': {
         let selectedCat = '';
-        if (messageText.startsWith('cat_')) {
-          selectedCat = messageText.replace('cat_', '');
-        } else {
-          // Fallback text match
-          const cleanText = messageText.toLowerCase().trim();
-          Object.keys(CATEGORY_MAP).forEach(k => {
-            if (cleanText.includes(k.toLowerCase())) selectedCat = k;
-          });
+        const cleanMsg = messageText.toLowerCase().trim();
+        if (cleanMsg === '8' || messageText === 'global_main_menu') {
+          await triggerMainMenu();
+          return;
+        }
+
+        if (cleanMsg === '1') selectedCat = 'CP Faucets';
+        else if (cleanMsg === '2') selectedCat = 'PTMT Faucets';
+        else if (cleanMsg === '3') selectedCat = 'Accessories';
+        else if (cleanMsg === '4') selectedCat = 'Health Faucets';
+        else if (cleanMsg === '5') selectedCat = 'Showers';
+        else if (cleanMsg === '6') selectedCat = 'Ball Valves';
+        else if (cleanMsg === '7') selectedCat = 'All Categories';
+        else {
+          if (messageText.startsWith('cat_')) {
+            selectedCat = messageText.replace('cat_', '');
+          } else {
+            Object.keys(CATEGORY_MAP).forEach(k => {
+              if (cleanMsg.includes(k.toLowerCase())) selectedCat = k;
+            });
+          }
         }
 
         const mapMeta = CATEGORY_MAP[selectedCat];
@@ -666,9 +681,15 @@ app.post('/webhook', async (req, res) => {
 
       case 'POST_CATALOGUE': {
         let nextAct = '';
-        if (messageText === 'biz_sales' || messageText.toLowerCase().includes('sales')) nextAct = 'sales';
-        else if (messageText === 'biz_requirement' || messageText.toLowerCase().includes('submit') || messageText.toLowerCase().includes('requirement')) nextAct = 'requirement';
-        else if (messageText === 'biz_catalogues' || messageText.toLowerCase().includes('other categories') || messageText.toLowerCase().includes('view')) nextAct = 'catalogues';
+        const cleanMsg = messageText.toLowerCase().trim();
+        if (messageText === 'global_main_menu' || cleanMsg === '4') {
+          await triggerMainMenu();
+          return;
+        }
+
+        if (messageText === 'biz_sales' || cleanMsg.includes('sales') || cleanMsg === '1') nextAct = 'sales';
+        else if (messageText === 'biz_requirement' || cleanMsg.includes('submit') || cleanMsg === '2') nextAct = 'requirement';
+        else if (messageText === 'biz_catalogues' || cleanMsg.includes('other categories') || cleanMsg.includes('view') || cleanMsg === '3') nextAct = 'catalogues';
 
         if (!nextAct) {
           await sendText(phoneNumber, textDict.invalidInput, instanceName);
@@ -902,14 +923,27 @@ app.post('/webhook', async (req, res) => {
 
       case 'FORM_INTEREST': {
         let selectedInterest = '';
-        if (messageText.startsWith('interest_')) {
-          selectedInterest = messageText.replace('interest_', '');
-        } else {
-          // Fallback text match
-          const cleanText = messageText.toLowerCase().trim();
-          Object.keys(CATEGORY_MAP).forEach(k => {
-            if (cleanText.includes(k.toLowerCase())) selectedInterest = k;
-          });
+        const cleanMsg = messageText.toLowerCase().trim();
+        if (messageText === 'global_main_menu' || cleanMsg === '8') {
+          await triggerMainMenu();
+          return;
+        }
+
+        if (cleanMsg === '1') selectedInterest = 'CP Faucets';
+        else if (cleanMsg === '2') selectedInterest = 'PTMT Faucets';
+        else if (cleanMsg === '3') selectedInterest = 'Accessories';
+        else if (cleanMsg === '4') selectedInterest = 'Health Faucets';
+        else if (cleanMsg === '5') selectedInterest = 'Showers';
+        else if (cleanMsg === '6') selectedInterest = 'Ball Valves';
+        else if (cleanMsg === '7') selectedInterest = 'All Categories';
+        else {
+          if (messageText.startsWith('interest_')) {
+            selectedInterest = messageText.replace('interest_', '');
+          } else {
+            Object.keys(CATEGORY_MAP).forEach(k => {
+              if (cleanMsg.includes(k.toLowerCase())) selectedInterest = k;
+            });
+          }
         }
 
         if (!selectedInterest || !CATEGORY_MAP[selectedInterest]) {
