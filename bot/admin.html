@@ -374,44 +374,96 @@
     <div id="tab-catalogues" class="tab-content active">
       <h3 style="margin-bottom: 20px; font-weight: 600;">Upload Collection Catalogues</h3>
       <div class="grid">
-        <!-- Aqua Collection -->
+        <!-- CP Faucets -->
         <div class="upload-card">
-          <div class="card-title"><span style="color:var(--accent-color);">●</span> Aqua PDF</div>
-          <div class="dropzone" id="dz-pdf-aqua" onclick="triggerFileSelect('pdf-aqua')">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> CP Faucets PDF</div>
+          <div class="dropzone" id="dz-pdf-cp-faucets" onclick="triggerFileSelect('pdf-cp-faucets')">
             <span style="font-size: 24px;">📁</span>
             <p>Drag & Drop or Click to Upload</p>
             <span style="font-size: 10px; color: var(--text-secondary);">Only PDF allowed (Max 10MB)</span>
-            <input type="file" id="file-pdf-aqua" class="file-input" accept="application/pdf" onchange="handleFile(this, 'catalogue_aqua')">
+            <input type="file" id="file-pdf-cp-faucets" class="file-input" accept="application/pdf" onchange="handleFile(this, 'catalogue_cp_faucets')">
           </div>
-          <div class="progress-bar" id="pb-catalogue_aqua"><div class="progress-fill" id="pf-catalogue_aqua"></div></div>
-          <div class="status-msg" id="msg-catalogue_aqua"></div>
-          <div class="url-display" id="url-catalogue_aqua">Loading current URL...</div>
+          <div class="progress-bar" id="pb-catalogue_cp_faucets"><div class="progress-fill" id="pf-catalogue_cp_faucets"></div></div>
+          <div class="status-msg" id="msg-catalogue_cp_faucets"></div>
+          <div class="url-display" id="url-catalogue_cp_faucets">Loading current URL...</div>
         </div>
-        <!-- Della Collection -->
+        <!-- PTMT Faucets -->
         <div class="upload-card">
-          <div class="card-title"><span style="color:var(--accent-color);">●</span> Della PDF</div>
-          <div class="dropzone" id="dz-pdf-della" onclick="triggerFileSelect('pdf-della')">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> PTMT Faucets PDF</div>
+          <div class="dropzone" id="dz-pdf-ptmt-faucets" onclick="triggerFileSelect('pdf-ptmt-faucets')">
             <span style="font-size: 24px;">📁</span>
             <p>Drag & Drop or Click to Upload</p>
             <span style="font-size: 10px; color: var(--text-secondary);">Only PDF allowed (Max 10MB)</span>
-            <input type="file" id="file-pdf-della" class="file-input" accept="application/pdf" onchange="handleFile(this, 'catalogue_della')">
+            <input type="file" id="file-pdf-ptmt-faucets" class="file-input" accept="application/pdf" onchange="handleFile(this, 'catalogue_ptmt_faucets')">
           </div>
-          <div class="progress-bar" id="pb-catalogue_della"><div class="progress-fill" id="pf-catalogue_della"></div></div>
-          <div class="status-msg" id="msg-catalogue_della"></div>
-          <div class="url-display" id="url-catalogue_della">Loading current URL...</div>
+          <div class="progress-bar" id="pb-catalogue_ptmt_faucets"><div class="progress-fill" id="pf-catalogue_ptmt_faucets"></div></div>
+          <div class="status-msg" id="msg-catalogue_ptmt_faucets"></div>
+          <div class="url-display" id="url-catalogue_ptmt_faucets">Loading current URL...</div>
         </div>
-        <!-- Royal Collection -->
+        <!-- Accessories -->
         <div class="upload-card">
-          <div class="card-title"><span style="color:var(--accent-color);">●</span> Royal PDF</div>
-          <div class="dropzone" id="dz-pdf-royal" onclick="triggerFileSelect('pdf-royal')">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> Accessories PDF</div>
+          <div class="dropzone" id="dz-pdf-accessories" onclick="triggerFileSelect('pdf-accessories')">
             <span style="font-size: 24px;">📁</span>
             <p>Drag & Drop or Click to Upload</p>
             <span style="font-size: 10px; color: var(--text-secondary);">Only PDF allowed (Max 10MB)</span>
-            <input type="file" id="file-pdf-royal" class="file-input" accept="application/pdf" onchange="handleFile(this, 'catalogue_royal')">
+            <input type="file" id="file-pdf-accessories" class="file-input" accept="application/pdf" onchange="handleFile(this, 'catalogue_accessories')">
           </div>
-          <div class="progress-bar" id="pb-catalogue_royal"><div class="progress-fill" id="pf-catalogue_royal"></div></div>
-          <div class="status-msg" id="msg-catalogue_royal"></div>
-          <div class="url-display" id="url-catalogue_royal">Loading current URL...</div>
+          <div class="progress-bar" id="pb-catalogue_accessories"><div class="progress-fill" id="pf-catalogue_accessories"></div></div>
+          <div class="status-msg" id="msg-catalogue_accessories"></div>
+          <div class="url-display" id="url-catalogue_accessories">Loading current URL...</div>
+        </div>
+        <!-- Health Faucets -->
+        <div class="upload-card">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> Health Faucets PDF</div>
+          <div class="dropzone" id="dz-pdf-health-faucets" onclick="triggerFileSelect('pdf-health-faucets')">
+            <span style="font-size: 24px;">📁</span>
+            <p>Drag & Drop or Click to Upload</p>
+            <span style="font-size: 10px; color: var(--text-secondary);">Only PDF allowed (Max 10MB)</span>
+            <input type="file" id="file-pdf-health-faucets" class="file-input" accept="application/pdf" onchange="handleFile(this, 'catalogue_health_faucets')">
+          </div>
+          <div class="progress-bar" id="pb-catalogue_health_faucets"><div class="progress-fill" id="pf-catalogue_health_faucets"></div></div>
+          <div class="status-msg" id="msg-catalogue_health_faucets"></div>
+          <div class="url-display" id="url-catalogue_health_faucets">Loading current URL...</div>
+        </div>
+        <!-- Showers -->
+        <div class="upload-card">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> Showers PDF</div>
+          <div class="dropzone" id="dz-pdf-showers" onclick="triggerFileSelect('pdf-showers')">
+            <span style="font-size: 24px;">📁</span>
+            <p>Drag & Drop or Click to Upload</p>
+            <span style="font-size: 10px; color: var(--text-secondary);">Only PDF allowed (Max 10MB)</span>
+            <input type="file" id="file-pdf-showers" class="file-input" accept="application/pdf" onchange="handleFile(this, 'catalogue_showers')">
+          </div>
+          <div class="progress-bar" id="pb-catalogue_showers"><div class="progress-fill" id="pf-catalogue_showers"></div></div>
+          <div class="status-msg" id="msg-catalogue_showers"></div>
+          <div class="url-display" id="url-catalogue_showers">Loading current URL...</div>
+        </div>
+        <!-- Ball Valves -->
+        <div class="upload-card">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> Ball Valves PDF</div>
+          <div class="dropzone" id="dz-pdf-ball-valves" onclick="triggerFileSelect('pdf-ball-valves')">
+            <span style="font-size: 24px;">📁</span>
+            <p>Drag & Drop or Click to Upload</p>
+            <span style="font-size: 10px; color: var(--text-secondary);">Only PDF allowed (Max 10MB)</span>
+            <input type="file" id="file-pdf-ball-valves" class="file-input" accept="application/pdf" onchange="handleFile(this, 'catalogue_ball_valves')">
+          </div>
+          <div class="progress-bar" id="pb-catalogue_ball_valves"><div class="progress-fill" id="pf-catalogue_ball_valves"></div></div>
+          <div class="status-msg" id="msg-catalogue_ball_valves"></div>
+          <div class="url-display" id="url-catalogue_ball_valves">Loading current URL...</div>
+        </div>
+        <!-- All Categories -->
+        <div class="upload-card">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> Complete Catalogue PDF</div>
+          <div class="dropzone" id="dz-pdf-all-categories" onclick="triggerFileSelect('pdf-all-categories')">
+            <span style="font-size: 24px;">📁</span>
+            <p>Drag & Drop or Click to Upload</p>
+            <span style="font-size: 10px; color: var(--text-secondary);">Only PDF allowed (Max 10MB)</span>
+            <input type="file" id="file-pdf-all-categories" class="file-input" accept="application/pdf" onchange="handleFile(this, 'catalogue_all_categories')">
+          </div>
+          <div class="progress-bar" id="pb-catalogue_all_categories"><div class="progress-fill" id="pf-catalogue_all_categories"></div></div>
+          <div class="status-msg" id="msg-catalogue_all_categories"></div>
+          <div class="url-display" id="url-catalogue_all_categories">Loading current URL...</div>
         </div>
       </div>
     </div>
@@ -420,44 +472,96 @@
     <div id="tab-images" class="tab-content">
       <h3 style="margin-bottom: 20px; font-weight: 600;">Upload Collection Showcase Images</h3>
       <div class="grid">
-        <!-- Aqua Image -->
+        <!-- CP Faucets Image -->
         <div class="upload-card">
-          <div class="card-title"><span style="color:var(--accent-color);">●</span> Aqua Image</div>
-          <div class="dropzone" id="dz-img-aqua" onclick="triggerFileSelect('img-aqua')">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> CP Faucets Image</div>
+          <div class="dropzone" id="dz-img-cp-faucets" onclick="triggerFileSelect('img-cp-faucets')">
             <span style="font-size: 24px;">🖼️</span>
             <p>Drag & Drop or Click to Upload</p>
             <span style="font-size: 10px; color: var(--text-secondary);">PNG or JPG (Max 5MB)</span>
-            <input type="file" id="file-img-aqua" class="file-input" accept="image/*" onchange="handleFile(this, 'intro_image_aqua')">
+            <input type="file" id="file-img-cp-faucets" class="file-input" accept="image/*" onchange="handleFile(this, 'intro_image_cp_faucets')">
           </div>
-          <div class="progress-bar" id="pb-intro_image_aqua"><div class="progress-fill" id="pf-intro_image_aqua"></div></div>
-          <div class="status-msg" id="msg-intro_image_aqua"></div>
-          <div class="url-display" id="url-intro_image_aqua">Loading current URL...</div>
+          <div class="progress-bar" id="pb-intro_image_cp_faucets"><div class="progress-fill" id="pf-intro_image_cp_faucets"></div></div>
+          <div class="status-msg" id="msg-intro_image_cp_faucets"></div>
+          <div class="url-display" id="url-intro_image_cp_faucets">Loading current URL...</div>
         </div>
-        <!-- Della Image -->
+        <!-- PTMT Faucets Image -->
         <div class="upload-card">
-          <div class="card-title"><span style="color:var(--accent-color);">●</span> Della Image</div>
-          <div class="dropzone" id="dz-img-della" onclick="triggerFileSelect('img-della')">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> PTMT Faucets Image</div>
+          <div class="dropzone" id="dz-img-ptmt-faucets" onclick="triggerFileSelect('img-ptmt-faucets')">
             <span style="font-size: 24px;">🖼️</span>
             <p>Drag & Drop or Click to Upload</p>
             <span style="font-size: 10px; color: var(--text-secondary);">PNG or JPG (Max 5MB)</span>
-            <input type="file" id="file-img-della" class="file-input" accept="image/*" onchange="handleFile(this, 'intro_image_della')">
+            <input type="file" id="file-img-ptmt-faucets" class="file-input" accept="image/*" onchange="handleFile(this, 'intro_image_ptmt_faucets')">
           </div>
-          <div class="progress-bar" id="pb-intro_image_della"><div class="progress-fill" id="pf-intro_image_della"></div></div>
-          <div class="status-msg" id="msg-intro_image_della"></div>
-          <div class="url-display" id="url-intro_image_della">Loading current URL...</div>
+          <div class="progress-bar" id="pb-intro_image_ptmt_faucets"><div class="progress-fill" id="pf-intro_image_ptmt_faucets"></div></div>
+          <div class="status-msg" id="msg-intro_image_ptmt_faucets"></div>
+          <div class="url-display" id="url-intro_image_ptmt_faucets">Loading current URL...</div>
         </div>
-        <!-- Royal Image -->
+        <!-- Accessories Image -->
         <div class="upload-card">
-          <div class="card-title"><span style="color:var(--accent-color);">●</span> Royal Image</div>
-          <div class="dropzone" id="dz-img-royal" onclick="triggerFileSelect('img-royal')">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> Accessories Image</div>
+          <div class="dropzone" id="dz-img-accessories" onclick="triggerFileSelect('img-accessories')">
             <span style="font-size: 24px;">🖼️</span>
             <p>Drag & Drop or Click to Upload</p>
             <span style="font-size: 10px; color: var(--text-secondary);">PNG or JPG (Max 5MB)</span>
-            <input type="file" id="file-img-royal" class="file-input" accept="image/*" onchange="handleFile(this, 'intro_image_royal')">
+            <input type="file" id="file-img-accessories" class="file-input" accept="image/*" onchange="handleFile(this, 'intro_image_accessories')">
           </div>
-          <div class="progress-bar" id="pb-intro_image_royal"><div class="progress-fill" id="pf-intro_image_royal"></div></div>
-          <div class="status-msg" id="msg-intro_image_royal"></div>
-          <div class="url-display" id="url-intro_image_royal">Loading current URL...</div>
+          <div class="progress-bar" id="pb-intro_image_accessories"><div class="progress-fill" id="pf-intro_image_accessories"></div></div>
+          <div class="status-msg" id="msg-intro_image_accessories"></div>
+          <div class="url-display" id="url-intro_image_accessories">Loading current URL...</div>
+        </div>
+        <!-- Health Faucets Image -->
+        <div class="upload-card">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> Health Faucets Image</div>
+          <div class="dropzone" id="dz-img-health-faucets" onclick="triggerFileSelect('img-health-faucets')">
+            <span style="font-size: 24px;">🖼️</span>
+            <p>Drag & Drop or Click to Upload</p>
+            <span style="font-size: 10px; color: var(--text-secondary);">PNG or JPG (Max 5MB)</span>
+            <input type="file" id="file-img-health-faucets" class="file-input" accept="image/*" onchange="handleFile(this, 'intro_image_health_faucets')">
+          </div>
+          <div class="progress-bar" id="pb-intro_image_health_faucets"><div class="progress-fill" id="pf-intro_image_health_faucets"></div></div>
+          <div class="status-msg" id="msg-intro_image_health_faucets"></div>
+          <div class="url-display" id="url-intro_image_health_faucets">Loading current URL...</div>
+        </div>
+        <!-- Showers Image -->
+        <div class="upload-card">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> Showers Image</div>
+          <div class="dropzone" id="dz-img-showers" onclick="triggerFileSelect('img-showers')">
+            <span style="font-size: 24px;">🖼️</span>
+            <p>Drag & Drop or Click to Upload</p>
+            <span style="font-size: 10px; color: var(--text-secondary);">PNG or JPG (Max 5MB)</span>
+            <input type="file" id="file-img-showers" class="file-input" accept="image/*" onchange="handleFile(this, 'intro_image_showers')">
+          </div>
+          <div class="progress-bar" id="pb-intro_image_showers"><div class="progress-fill" id="pf-intro_image_showers"></div></div>
+          <div class="status-msg" id="msg-intro_image_showers"></div>
+          <div class="url-display" id="url-intro_image_showers">Loading current URL...</div>
+        </div>
+        <!-- Ball Valves Image -->
+        <div class="upload-card">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> Ball Valves Image</div>
+          <div class="dropzone" id="dz-img-ball-valves" onclick="triggerFileSelect('img-ball-valves')">
+            <span style="font-size: 24px;">🖼️</span>
+            <p>Drag & Drop or Click to Upload</p>
+            <span style="font-size: 10px; color: var(--text-secondary);">PNG or JPG (Max 5MB)</span>
+            <input type="file" id="file-img-ball-valves" class="file-input" accept="image/*" onchange="handleFile(this, 'intro_image_ball_valves')">
+          </div>
+          <div class="progress-bar" id="pb-intro_image_ball_valves"><div class="progress-fill" id="pf-intro_image_ball_valves"></div></div>
+          <div class="status-msg" id="msg-intro_image_ball_valves"></div>
+          <div class="url-display" id="url-intro_image_ball_valves">Loading current URL...</div>
+        </div>
+        <!-- All Categories Image -->
+        <div class="upload-card">
+          <div class="card-title"><span style="color:var(--accent-color);">●</span> All Categories Image</div>
+          <div class="dropzone" id="dz-img-all-categories" onclick="triggerFileSelect('img-all-categories')">
+            <span style="font-size: 24px;">🖼️</span>
+            <p>Drag & Drop or Click to Upload</p>
+            <span style="font-size: 10px; color: var(--text-secondary);">PNG or JPG (Max 5MB)</span>
+            <input type="file" id="file-img-all-categories" class="file-input" accept="image/*" onchange="handleFile(this, 'intro_image_all_categories')">
+          </div>
+          <div class="progress-bar" id="pb-intro_image_all_categories"><div class="progress-fill" id="pf-intro_image_all_categories"></div></div>
+          <div class="status-msg" id="msg-intro_image_all_categories"></div>
+          <div class="url-display" id="url-intro_image_all_categories">Loading current URL...</div>
         </div>
       </div>
     </div>
