@@ -162,6 +162,17 @@ if (metricsConfig.ENABLED) {
 
 if (!serverConfig.DISABLE_MANAGER) router.use('/manager', new ViewsRouter().router);
 
+router.get('/admin', (req, res) => {
+  res.sendFile(path.join(process.cwd(), 'bot', 'admin.html'));
+});
+
+router.get('/admin/config-creds', (req, res) => {
+  res.json({
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_KEY: process.env.SUPABASE_KEY,
+  });
+});
+
 router.get('/assets/*', (req, res) => {
   const fileName = req.params[0];
 
