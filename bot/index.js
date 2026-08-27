@@ -8,6 +8,9 @@ app.use(express.json());
 
 const PORT = process.env.BOT_PORT || 3000;
 
+// Set to prevent duplicate webhook processing (e.g. global + instance webhooks)
+const processedMessages = new Set();
+
 const locales = {
   English: {
     welcome: "Welcome to RN Valves! Please select your language / भाषा चुनें:",
@@ -121,7 +124,8 @@ function getIncomingMessage(body) {
   return {
     phoneNumber,
     pushName,
-    messageText: messageText.trim()
+    messageText: messageText.trim(),
+    messageId: data.key.id
   };
 }
 
@@ -131,7 +135,18 @@ app.post('/webhook', async (req, res) => {
   const incoming = getIncomingMessage(req.body);
   if (!incoming) return;
 
-  const { phoneNumber, pushName, messageText } = incoming;
+  const { phoneNumber, pushName, messageText, messageId } = incoming;
+
+  if (messageId) {
+    if (processedMessages.has(messageId)) {
+      console.log(`[Deduplicator] Ignored duplicate webhook call for message: ${messageId}`);
+      return;
+    }
+    processedMessages.add(messageId);
+    setTimeout(() => {
+      processedMessages.delete(messageId);
+    }, 10000);
+  }
   const instanceName = req.body.instance || process.env.EVOLUTION_DEFAULT_INSTANCE;
 
   try {
