@@ -228,6 +228,59 @@ function cleanMobileNumber(number) {
   return cleaned;
 }
 
+// Bot/Loop prevention config and helpers
+const AUTO_RESPONDER_SUBSTRINGS = [
+  'thank you for contacting',
+  'thanks for contacting',
+  'hamse sampark karne',
+  'sampark karne ke liye',
+  'dhanhyavad',
+  'dhanyawad',
+  'we will get back to you',
+  'automatic reply',
+  'auto-reply',
+  'away message',
+  'this is an automated',
+  'automated message',
+  'welcome to our business',
+  'auto reply',
+  'thank you for your message',
+  'thanks for your message'
+];
+
+function isAutoResponder(text) {
+  if (!text) return false;
+  const clean = text.toLowerCase();
+  return AUTO_RESPONDER_SUBSTRINGS.some(sub => clean.includes(sub));
+}
+
+const messageTimestamps = {}; // { phoneNumber: [timestamp1, timestamp2, ...] }
+const blockedNumbers = {};     // { phoneNumber: blockExpiryTime }
+
+function isRateLimitedOrBlocked(phoneNumber) {
+  const now = Date.now();
+  
+  if (blockedNumbers[phoneNumber] && blockedNumbers[phoneNumber] > now) {
+    console.warn(`[LoopDetector] Ignored message from temporarily blocked number: ${phoneNumber}`);
+    return true;
+  }
+  
+  if (!messageTimestamps[phoneNumber]) {
+    messageTimestamps[phoneNumber] = [];
+  }
+  messageTimestamps[phoneNumber] = messageTimestamps[phoneNumber].filter(t => now - t < 30000);
+  
+  messageTimestamps[phoneNumber].push(now);
+  
+  if (messageTimestamps[phoneNumber].length > 5) {
+    blockedNumbers[phoneNumber] = now + 5 * 60 * 1000; // block for 5 mins
+    console.warn(`[LoopDetector] Rate limit exceeded for ${phoneNumber}. Blocking for 5 minutes to prevent bot loops.`);
+    return true;
+  }
+  
+  return false;
+}
+
 function getIncomingMessage(body) {
   if (body.event !== 'messages.upsert') return null;
   
@@ -235,7 +288,8 @@ function getIncomingMessage(body) {
   if (!data || !data.key || data.key.fromMe) return null;
 
   const remoteJid = data.key.remoteJid;
-  if (remoteJid.endsWith('@g.us')) return null;
+  // Ignore any chats that are not personal direct messages (groups @g.us, broadcasts, newsletters @newsletter, etc.)
+  if (!remoteJid || !remoteJid.endsWith('@s.whatsapp.net')) return null;
 
   const phoneNumber = remoteJid.split('@')[0];
   const pushName = data.pushName || 'Valued Customer';
@@ -293,6 +347,17 @@ app.post('/webhook', async (req, res) => {
   if (!incoming) return;
 
   const { phoneNumber, pushName, messageText, messageId } = incoming;
+
+  // 1. Bot check: Ignore common auto-responder signatures
+  if (isAutoResponder(messageText)) {
+    console.log(`[AutoResponder] Ignored message matching auto-responder signature: "${messageText}" from ${phoneNumber}`);
+    return;
+  }
+
+  // 2. Loop/RateLimit check: Prevent infinite bot loops
+  if (isRateLimitedOrBlocked(phoneNumber)) {
+    return;
+  }
 
   if (messageId) {
     if (processedMessages.has(messageId)) {
