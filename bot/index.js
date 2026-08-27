@@ -287,6 +287,7 @@ app.get('/admin/config-creds', (req, res) => {
 
 app.post('/webhook', async (req, res) => {
   res.status(200).send({ status: 'ACK' });
+  console.log("WEBHOOK_BODY:", JSON.stringify(req.body));
 
   const incoming = getIncomingMessage(req.body);
   if (!incoming) return;
