@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 const express = require('express');
 const { supabase } = require('./db');
 const { sendText, sendButtons, sendList, sendMediaUrl } = require('./api');
@@ -78,20 +79,47 @@ const locales = {
   }
 };
 
-function getAgentForState(state) {
+async function getConfigValue(key, defaultValue) {
+  try {
+    const { data, error } = await supabase
+      .from('bot_config')
+      .select('value')
+      .eq('key', key)
+      .single();
+
+    if (error) {
+      if (error.code !== 'PGRST116') {
+        console.error(`Error fetching config ${key}:`, error);
+      }
+      return defaultValue;
+    }
+    return data.value || defaultValue;
+  } catch (err) {
+    console.error(`Error in getConfigValue for ${key}:`, err);
+    return defaultValue;
+  }
+}
+
+async function getAgentForState(state) {
   const s = (state || '').toLowerCase().trim();
   if (s.includes('rajasthan')) {
-    return { name: 'Gaurav', phone: '+91 99999 99991' };
+    const phone = await getConfigValue('agent_gaurav_phone', '+91 99999 99991');
+    return { name: 'Gaurav', phone };
   } else if (s.includes('kerala') || s.includes('delhi') || s.includes('jammu') || s.includes('kashmir') || s.includes('jk') || s.includes('j&k')) {
-    return { name: 'Danish', phone: '+91 99999 99992' };
+    const phone = await getConfigValue('agent_danish_phone', '+91 99999 99992');
+    return { name: 'Danish', phone };
   } else if (s.includes('uttar pradesh') || s.includes('up') || s.includes('bihar')) {
-    return { name: 'Arpita', phone: '+91 99999 99993' };
+    const phone = await getConfigValue('agent_arpita_phone', '+91 99999 99993');
+    return { name: 'Arpita', phone };
   } else if (s.includes('maharashtra') || s.includes('mh') || s.includes('karnataka') || s.includes('ka') || s.includes('madhya pradesh') || s.includes('mp')) {
-    return { name: 'Vinod Kumar', phone: '+91 99999 99994' };
+    const phone = await getConfigValue('agent_vinod_phone', '+91 99999 99994');
+    return { name: 'Vinod Kumar', phone };
   } else if (s.includes('hayana') || s.includes('hanya') || s.includes('hr') || s.includes('gujarat') || s.includes('gj') || s.includes('punjab') || s.includes('pb') || s.includes('uttarakhand') || s.includes('uk') || s.includes('himachal') || s.includes('hp')) {
-    return { name: 'Amit', phone: '+91 99999 99995' };
+    const phone = await getConfigValue('agent_amit_phone', '+91 99999 99995');
+    return { name: 'Amit', phone };
   } else {
-    return { name: 'Danish (Default)', phone: '+91 99999 99992' };
+    const phone = await getConfigValue('agent_danish_phone', '+91 99999 99992');
+    return { name: 'Danish (Default)', phone };
   }
 }
 
@@ -128,6 +156,17 @@ function getIncomingMessage(body) {
     messageId: data.key.id
   };
 }
+
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
+app.get('/admin/config-creds', (req, res) => {
+  res.json({
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_KEY: process.env.SUPABASE_KEY
+  });
+});
 
 app.post('/webhook', async (req, res) => {
   res.status(200).send({ status: 'ACK' });
@@ -346,8 +385,14 @@ app.post('/webhook', async (req, res) => {
 
         await supabase.from('bot_state').update({ subcategory: sub, current_step: 'PRODUCT_INTRO' }).eq('phone_number', phoneNumber);
 
+        const pdfKey = `catalogue_${sub.toLowerCase()}`;
+        const imgKey = `intro_image_${sub.toLowerCase()}`;
+
+        const pdfUrl = await getConfigValue(pdfKey, process.env.CATALOGUE_PDF_URL);
+        const imgUrl = await getConfigValue(imgKey, process.env.PRODUCT_INTRO_IMAGE_URL);
+
         await sendText(phoneNumber, selectedLanguage === 'English' ? "Sending catalogue PDF..." : "कैटलॉग पीडीएफ भेजी जा रही है...", instanceName);
-        await sendMediaUrl(phoneNumber, process.env.CATALOGUE_PDF_URL, 'document', `RN_Valves_${sub}_Catalogue.pdf`, `${sub} Collection Catalogue`, instanceName);
+        await sendMediaUrl(phoneNumber, pdfUrl, 'document', `RN_Valves_${sub}_Catalogue.pdf`, `${sub} Collection Catalogue`, instanceName);
 
         const introText = textDict.introCaption.replace('{subcategory}', sub);
         const buttons = [
@@ -355,7 +400,7 @@ app.post('/webhook', async (req, res) => {
           { type: 'reply', displayText: selectedLanguage === 'English' ? "Fill Form" : "विवरण भरें", id: "intro_form" }
         ];
 
-        await sendMediaUrl(phoneNumber, process.env.PRODUCT_INTRO_IMAGE_URL, 'image', '', introText, instanceName);
+        await sendMediaUrl(phoneNumber, imgUrl, 'image', '', introText, instanceName);
         await sendButtons(phoneNumber, selectedLanguage === 'English' ? "What would you like to do?" : "आप क्या करना चाहेंगे?", buttons, "RN Valves", "", instanceName);
         break;
       }
@@ -412,7 +457,7 @@ app.post('/webhook', async (req, res) => {
       case 'FORM_REQUIREMENT': {
         const fullForm = { ...stateData.lead_form, requirement: messageText };
         const stateName = fullForm.state || '';
-        const agent = getAgentForState(stateName);
+        const agent = await getAgentForState(stateName);
 
         const leadPayload = {
           full_name: fullForm.full_name,
