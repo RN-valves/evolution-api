@@ -35,20 +35,14 @@ async function sendText(number, text, instanceName = DEFAULT_INSTANCE) {
  * Send interactive buttons to a user
  */
 async function sendButtons(number, title, buttons, description = '', footer = '', instanceName = DEFAULT_INSTANCE) {
-  try {
-    const response = await client.post(`/message/sendButtons/${instanceName}`, {
-      number,
-      title,
-      description,
-      footer,
-      buttons
-    });
-    return response.data;
-  } catch (error) {
-    console.error(`Error sending buttons to ${number}:`, error.response?.data || error.message);
-    const buttonsText = buttons.map((b, i) => `*${i + 1}.* ${b.displayText}`).join('\n');
-    return sendText(number, `${title}\n\n${buttonsText}`, instanceName);
-  }
+  let text = '';
+  if (title) text += `*${title}*\n`;
+  if (description) text += `${description}\n`;
+  text += '\n';
+  const buttonsText = buttons.map((b, i) => `*${i + 1}.* ${b.displayText}`).join('\n');
+  text += buttonsText;
+  if (footer) text += `\n\n_${footer}_`;
+  return sendText(number, text.trim(), instanceName);
 }
 
 /**
