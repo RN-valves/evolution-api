@@ -241,17 +241,28 @@ function getIncomingMessage(body) {
   const pushName = data.pushName || 'Valued Customer';
   
   let messageText = '';
-  const msg = data.message;
-  if (!msg) return null;
+  
+  // Extract from nested data.message or root level data
+  const msg = data.message || {};
+  const root = data || {};
 
-  if (msg.conversation) {
-    messageText = msg.conversation;
-  } else if (msg.extendedTextMessage && msg.extendedTextMessage.text) {
-    messageText = msg.extendedTextMessage.text;
-  } else if (msg.buttonsResponseMessage && msg.buttonsResponseMessage.selectedButtonId) {
-    messageText = msg.buttonsResponseMessage.selectedButtonId;
-  } else if (msg.listResponseMessage && msg.listResponseMessage.singleSelectReply && msg.listResponseMessage.singleSelectReply.selectedRowId) {
-    messageText = msg.listResponseMessage.singleSelectReply.selectedRowId;
+  const listResponse = msg.listResponseMessage || root.listResponseMessage;
+  const buttonResponse = msg.buttonsResponseMessage || root.buttonsResponseMessage || msg.templateButtonReplyMessage || root.templateButtonReplyMessage;
+  const extendedText = msg.extendedTextMessage || root.extendedTextMessage;
+  const conversation = msg.conversation || root.conversation;
+
+  if (listResponse) {
+    if (listResponse.singleSelectReply && listResponse.singleSelectReply.selectedRowId) {
+      messageText = listResponse.singleSelectReply.selectedRowId;
+    } else if (listResponse.title) {
+      messageText = listResponse.title;
+    }
+  } else if (buttonResponse) {
+    messageText = buttonResponse.selectedButtonId || buttonResponse.selectedId || '';
+  } else if (extendedText && extendedText.text) {
+    messageText = extendedText.text;
+  } else if (conversation) {
+    messageText = conversation;
   }
 
   return {
