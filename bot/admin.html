@@ -518,7 +518,7 @@
     // We fetch these from the server endpoint to avoid exposing keys in code, or let the server inject them
     let SUPABASE_URL = "";
     let SUPABASE_KEY = "";
-    let supabase = null;
+    let supabaseClient = null;
 
     async function initSupabase() {
       try {
@@ -528,7 +528,7 @@
         SUPABASE_KEY = creds.SUPABASE_KEY;
         
         if (SUPABASE_URL && SUPABASE_KEY) {
-          supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+          supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
           loadAllConfigs();
         }
       } catch (err) {
@@ -598,7 +598,7 @@
     }
 
     async function uploadFile(file, key) {
-      if (!supabase) {
+      if (!supabaseClient) {
         showToast("Database not initialized", true);
         return;
       }
@@ -620,7 +620,7 @@
         const filePath = `${folder}/${fileName}`;
 
         // Upload to bucket catalogues
-        const { data, error } = await supabase.storage
+        const { data, error } = await supabaseClient.storage
           .from('catalogues')
           .upload(filePath, file, {
             cacheControl: '3600',
@@ -631,14 +631,14 @@
         pf.style.width = '80%';
 
         // Get public URL
-        const { data: urlData } = supabase.storage
+        const { data: urlData } = supabaseClient.storage
           .from('catalogues')
           .getPublicUrl(filePath);
 
         const publicUrl = urlData.publicUrl;
 
         // Save URL key in bot_config table
-        const { error: dbError } = await supabase
+        const { error: dbError } = await supabaseClient
           .from('bot_config')
           .upsert({ key: key, value: publicUrl, updated_at: new Date() });
 
@@ -664,9 +664,9 @@
     }
 
     async function loadAllConfigs() {
-      if (!supabase) return;
+      if (!supabaseClient) return;
       try {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
           .from('bot_config')
           .select('*');
 
@@ -700,7 +700,7 @@
     }
 
     async function saveCRM() {
-      if (!supabase) return;
+      if (!supabaseClient) return;
       
       const crmKeys = [
         { key: 'agent_gaurav_phone', value: document.getElementById('crm-gaurav').value },
@@ -712,7 +712,7 @@
 
       try {
         for (const item of crmKeys) {
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('bot_config')
             .upsert({ key: item.key, value: item.value, updated_at: new Date() });
           
@@ -725,7 +725,7 @@
     }
 
     async function saveGlobalSettings() {
-      if (!supabase) return;
+      if (!supabaseClient) return;
       
       const settingKeys = [
         { key: 'evolution_default_instance', value: document.getElementById('setting-instance').value },
@@ -734,7 +734,7 @@
 
       try {
         for (const item of settingKeys) {
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('bot_config')
             .upsert({ key: item.key, value: item.value, updated_at: new Date() });
           
