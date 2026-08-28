@@ -49,28 +49,23 @@ async function sendButtons(number, title, buttons, description = '', footer = ''
  * Send interactive list/menu to a user
  */
 async function sendList(number, title, buttonText, sections, description = '', footerText = '', instanceName = DEFAULT_INSTANCE) {
-  try {
-    const response = await client.post(`/message/sendList/${instanceName}`, {
-      number,
-      title,
-      description,
-      footerText,
-      buttonText,
-      sections
+  let listText = '';
+  if (title) listText += `*${title}*\n`;
+  if (description) listText += `${description}\n`;
+  listText += '\n';
+
+  let globalIndex = 1;
+  sections.forEach(sec => {
+    if (sec.title) listText += `*--- ${sec.title} ---*\n`;
+    sec.rows.forEach(row => {
+      listText += `*${globalIndex++}.* ${row.title}${row.description ? ` - _${row.description}_` : ''}\n`;
     });
-    return response.data;
-  } catch (error) {
-    console.error(`Error sending list to ${number}:`, error.response?.data || error.message);
-    let listText = `${title}\n\n`;
-    sections.forEach(sec => {
-      listText += `*--- ${sec.title} ---*\n`;
-      sec.rows.forEach((row, i) => {
-        listText += `*${i + 1}.* ${row.title} - ${row.description}\n`;
-      });
-      listText += '\n';
-    });
-    return sendText(number, listText.trim(), instanceName);
-  }
+    listText += '\n';
+  });
+
+  if (footerText) listText += `\n_${footerText}_`;
+
+  return sendText(number, listText.trim(), instanceName);
 }
 
 /**
