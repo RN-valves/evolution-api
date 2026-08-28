@@ -4,7 +4,7 @@ const axios = require('axios');
 // Note: When running on the same Render service, the bot can call localhost directly to save external network latency!
 // We fallback to EVOLUTION_API_URL if localhost isn't running or when testing externally.
 const API_URL = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
-const API_KEY = process.env.EVOLUTION_API_KEY || process.env.AUTHENTICATION_API_KEY;
+const API_KEY = process.env.EVOLUTION_API_KEY || process.env.AUTHENTICATION_API_KEY || '429683C4C977415CAAFCCE10F7D57E11';
 const DEFAULT_INSTANCE = process.env.EVOLUTION_DEFAULT_INSTANCE || 'evolution';
 
 const client = axios.create({
