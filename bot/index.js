@@ -1127,6 +1127,15 @@ app.post('/webhook', async (req, res) => {
 
   } catch (err) {
     console.error('Fatal chatbot handler error:', err);
+    try {
+      await supabase.from('bot_config').upsert({
+        key: 'bot_last_error',
+        value: `${err.message}\n${err.stack}\nResponse: ${JSON.stringify(err.response?.data || {})}`,
+        updated_at: new Date()
+      });
+    } catch (e) {
+      console.error('Failed to log error to database:', e);
+    }
   }
 });
 
