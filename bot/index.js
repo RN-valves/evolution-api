@@ -291,9 +291,9 @@ function isRateLimitedOrBlocked(phoneNumber) {
   
   messageTimestamps[phoneNumber].push(now);
   
-  if (messageTimestamps[phoneNumber].length > 5) {
-    blockedNumbers[phoneNumber] = now + 5 * 60 * 1000; // block for 5 mins
-    console.warn(`[LoopDetector] Rate limit exceeded for ${phoneNumber}. Blocking for 5 minutes to prevent bot loops.`);
+  if (messageTimestamps[phoneNumber].length > 20) {
+    blockedNumbers[phoneNumber] = now + 15 * 1000; // block for 15 seconds
+    console.warn(`[LoopDetector] Rate limit exceeded for ${phoneNumber}. Blocking for 15 seconds to prevent bot loops.`);
     return true;
   }
   

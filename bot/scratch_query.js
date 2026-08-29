@@ -15,8 +15,8 @@ const client = new Client({
 async function main() {
   await client.connect();
   try {
-    const res = await client.query("SELECT * FROM bot_state WHERE phone_number LIKE '%7428744121%'");
-    console.log("=== State for 7428744121 ===");
+    const res = await client.query('SELECT * FROM bot_state ORDER BY updated_at DESC LIMIT 10');
+    console.log("=== Most recent bot states ===");
     console.log(JSON.stringify(res.rows, null, 2));
 
     const err = await client.query("SELECT * FROM bot_config WHERE key = 'bot_last_error'");
