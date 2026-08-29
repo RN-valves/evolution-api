@@ -1,28 +1,51 @@
 require('dotenv').config();
 const axios = require('axios');
+const { supabase } = require('./db');
 
 // Note: When running on the same Render service, the bot can call localhost directly to save external network latency!
 // We fallback to EVOLUTION_API_URL if localhost isn't running or when testing externally.
 const API_URL = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
-const API_KEY = '429683C4C977415CAAFCCE10F7D57E11';
-const DEFAULT_INSTANCE = process.env.EVOLUTION_DEFAULT_INSTANCE || 'evolution';
+const DEFAULT_INSTANCE = process.env.EVOLUTION_DEFAULT_INSTANCE || 'my-bot-3';
 
 const client = axios.create({
   baseURL: API_URL,
   headers: {
-    'Content-Type': 'application/json',
-    'apikey': API_KEY
+    'Content-Type': 'application/json'
   }
 });
+
+/**
+ * Dynamically fetch the API key from the database (or environment variable, or hardcoded fallback)
+ */
+async function getApiKey() {
+  try {
+    const { data, error } = await supabase
+      .from('bot_config')
+      .select('value')
+      .eq('key', 'evolution_api_key')
+      .single();
+    if (data && data.value) {
+      return data.value;
+    }
+  } catch (err) {
+    // Fallback on error
+  }
+  return process.env.AUTHENTICATION_API_KEY || '429683C4C977415CAAFCCE10F7D57E11';
+}
 
 /**
  * Send text message to a user
  */
 async function sendText(number, text, instanceName = DEFAULT_INSTANCE) {
   try {
+    const apikey = await getApiKey();
     const response = await client.post(`/message/sendText/${instanceName}`, {
       number,
       text
+    }, {
+      headers: {
+        'apikey': apikey
+      }
     });
     return response.data;
   } catch (error) {
@@ -73,12 +96,17 @@ async function sendList(number, title, buttonText, sections, description = '', f
  */
 async function sendMediaUrl(number, mediaUrl, mediaType, fileName = '', caption = '', instanceName = DEFAULT_INSTANCE) {
   try {
+    const apikey = await getApiKey();
     const response = await client.post(`/message/sendMedia/${instanceName}`, {
       number,
       mediatype: mediaType,
       media: mediaUrl,
       fileName,
       caption
+    }, {
+      headers: {
+        'apikey': apikey
+      }
     });
     return response.data;
   } catch (error) {

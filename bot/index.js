@@ -138,11 +138,12 @@ const locales = {
 };
 
 const AGENTS = {
-  gaurav: { id: 'gaurav', name: 'Gaurav', phoneKey: 'agent_gaurav_phone', fallback: '+91 99999 99991' },
-  danish: { id: 'danish', name: 'Danish', phoneKey: 'agent_danish_phone', fallback: '+91 99999 99992' },
-  arpita: { id: 'arpita', name: 'Arpita', phoneKey: 'agent_arpita_phone', fallback: '+91 99999 99993' },
-  vinod: { id: 'vinod', name: 'Vinod Kumar', phoneKey: 'agent_vinod_phone', fallback: '+91 99999 99994' },
-  amit: { id: 'amit', name: 'Amit', phoneKey: 'agent_amit_phone', fallback: '+91 99999 99995' }
+  gaurav: { id: 'gaurav', name: 'Gaurav Khandelwal', phoneKey: 'agent_gaurav_phone', fallback: '+91 88006 86229' },
+  danish: { id: 'danish', name: 'Danish Husain Ansari', phoneKey: 'agent_danish_phone', fallback: '+91 93156 00189' },
+  arpita: { id: 'arpita', name: 'Arpita Srivastava', phoneKey: 'agent_arpita_phone', fallback: '+91 93155 96055' },
+  vinod: { id: 'vinod', name: 'Vinod Kumar', phoneKey: 'agent_vinod_phone', fallback: '+91 96433 08980' },
+  amit: { id: 'amit', name: 'Amit Kumar', phoneKey: 'agent_amit_phone', fallback: '+91 93151 60881' },
+  pavani: { id: 'pavani', name: 'Pavani Avadhutha', phoneKey: 'agent_pavani_phone', fallback: '+91 80765 55914' }
 };
 
 const CATEGORY_MAP = {
@@ -176,19 +177,37 @@ async function getConfigValue(key, defaultValue) {
   }
 }
 
-async function resolveAgentForState(stateName) {
+async function resolveAgentForState(stateName, districtName = '') {
   const s = (stateName || '').toLowerCase().trim();
+  const d = (districtName || '').toLowerCase().trim();
   let agentKey = null;
 
-  if (s.includes('rajasthan')) {
-    agentKey = 'gaurav';
-  } else if (s.includes('kerala') || s.includes('delhi') || s.includes('jammu') || s.includes('kashmir')) {
-    agentKey = 'danish';
-  } else if (s.includes('uttar pradesh') || s.includes('up') || s.includes('bihar')) {
-    agentKey = 'arpita';
-  } else if (s.includes('maharashtra') || s.includes('mh') || s.includes('karnataka') || s.includes('ka') || s.includes('madhya pradesh') || s.includes('mp')) {
+  // 1. Kolkata (District in West Bengal) routes to Amit Kumar
+  if (d.includes('kolkata') || s.includes('kolkata')) {
+    agentKey = 'amit';
+  }
+  // 2. Vinod Kumar (Goa, Maharashtra, Karnataka, Madhya Pradesh)
+  else if (s.includes('goa') || s.includes('maharashtra') || s.includes('mh') || s.includes('karnataka') || s.includes('ka') || s.includes('madhya pradesh') || s.includes('mp')) {
     agentKey = 'vinod';
-  } else if (s.includes('haryana') || s.includes('gujarat') || s.includes('gj') || s.includes('punjab') || s.includes('uttarakhand') || s.includes('himachal')) {
+  }
+  // 3. Danish Husain Ansari (West Bengal [excluding Kolkata], J&K, Kerala, Odisha, Jharkhand, Tamil Nadu, Assam, Himachal Pradesh)
+  else if (s.includes('west bengal') || s.includes('wb') || s.includes('jammu') || s.includes('kashmir') || s.includes('kerala') || s.includes('odisha') || s.includes('orissa') || s.includes('jharkhand') || s.includes('tamil nadu') || s.includes('tn') || s.includes('assam') || s.includes('himachal') || s.includes('hp')) {
+    agentKey = 'danish';
+  }
+  // 4. Arpita Srivastava (Bihar, Uttar Pradesh)
+  else if (s.includes('bihar') || s.includes('uttar pradesh') || s.includes('up')) {
+    agentKey = 'arpita';
+  }
+  // 5. Pavani Avadhutha (Andhra Pradesh, Telangana)
+  else if (s.includes('andhra') || s.includes('ap') || s.includes('telangana') || s.includes('ts')) {
+    agentKey = 'pavani';
+  }
+  // 6. Gaurav Khandelwal (Rajasthan)
+  else if (s.includes('rajasthan') || s.includes('rj')) {
+    agentKey = 'gaurav';
+  }
+  // 7. Amit Kumar (Gujarat, Delhi, Haryana, Punjab, Uttarakhand)
+  else if (s.includes('gujarat') || s.includes('gj') || s.includes('delhi') || s.includes('dl') || s.includes('haryana') || s.includes('hr') || s.includes('punjab') || s.includes('pb') || s.includes('uttarakhand') || s.includes('uk')) {
     agentKey = 'amit';
   }
 
@@ -289,9 +308,9 @@ function getIncomingMessage(body) {
 
   const remoteJid = data.key.remoteJid;
   // Ignore any chats that are not personal direct messages (groups @g.us, broadcasts, newsletters @newsletter, etc.)
-  if (!remoteJid || !remoteJid.endsWith('@s.whatsapp.net')) return null;
+  if (!remoteJid || (!remoteJid.endsWith('@s.whatsapp.net') && !remoteJid.endsWith('@lid'))) return null;
 
-  const phoneNumber = remoteJid.split('@')[0];
+  const phoneNumber = remoteJid;
   const pushName = data.pushName || 'Valued Customer';
   
   let messageText = '';
@@ -369,7 +388,7 @@ app.post('/webhook', async (req, res) => {
       processedMessages.delete(messageId);
     }, 10000);
   }
-  const instanceName = req.body.instance || process.env.EVOLUTION_DEFAULT_INSTANCE;
+  const instanceName = req.body.instance || process.env.EVOLUTION_DEFAULT_INSTANCE || 'my-bot-3';
 
   try {
     let { data: stateData, error } = await supabase
@@ -630,7 +649,7 @@ app.post('/webhook', async (req, res) => {
         } else if (action === 'sales' || action === 'pricing') {
           // If PIN is already known in session, resolve immediately
           if (stateData.pin_code && stateData.pin_code.length === 6) {
-            const agent = await resolveAgentForState(stateData.state);
+            const agent = await resolveAgentForState(stateData.state, stateData.city || stateData.district);
             if (agent) {
               await supabase.from('bot_state').update({ 
                 current_step: 'SALES_REP_SHOWN',
@@ -790,7 +809,7 @@ app.post('/webhook', async (req, res) => {
           await sendList(phoneNumber, textDict.catalogueMenu, 'Select Category', sections, 'RN Valves', '', instanceName);
         } else if (nextAct === 'sales') {
           if (stateData.pin_code && stateData.pin_code.length === 6) {
-            const agent = await resolveAgentForState(stateData.state);
+            const agent = await resolveAgentForState(stateData.state, stateData.city || stateData.district);
             if (agent) {
               await supabase.from('bot_state').update({ 
                 current_step: 'SALES_REP_SHOWN',
@@ -848,7 +867,7 @@ app.post('/webhook', async (req, res) => {
         }
 
         // Save derived location data
-        const agent = await resolveAgentForState(resolved.state);
+        const agent = await resolveAgentForState(resolved.state, resolved.city || resolved.district);
         
         if (agent) {
           await supabase.from('bot_state').update({ 

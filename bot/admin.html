@@ -571,24 +571,28 @@
       <h3 style="margin-bottom: 24px; font-weight: 600;">Geographic Agent Contact Routing</h3>
       <div class="form-grid">
         <div class="input-group">
-          <label>Gaurav (Rajasthan Agent Mobile)</label>
-          <input type="text" id="crm-gaurav" placeholder="+91 99999 99991">
+          <label>Gaurav Khandelwal (Rajasthan Agent Mobile)</label>
+          <input type="text" id="crm-gaurav" placeholder="+91 88006 86229">
         </div>
         <div class="input-group">
-          <label>Danish (Delhi, Kerala, J&K Agent Mobile)</label>
-          <input type="text" id="crm-danish" placeholder="+91 99999 99992">
+          <label>Danish Husain Ansari (WB, J&K, KL, OD, JH, TN, AS, HP Agent Mobile)</label>
+          <input type="text" id="crm-danish" placeholder="+91 93156 00189">
         </div>
         <div class="input-group">
-          <label>Arpita (UP, Bihar Agent Mobile)</label>
-          <input type="text" id="crm-arpita" placeholder="+91 99999 99993">
+          <label>Arpita Srivastava (UP, Bihar Agent Mobile)</label>
+          <input type="text" id="crm-arpita" placeholder="+91 93155 96055">
         </div>
         <div class="input-group">
-          <label>Vinod Kumar (MH, KA, MP Agent Mobile)</label>
-          <input type="text" id="crm-vinod" placeholder="+91 99999 99994">
+          <label>Vinod Kumar (Goa, MH, KA, MP Agent Mobile)</label>
+          <input type="text" id="crm-vinod" placeholder="+91 96433 08980">
         </div>
         <div class="input-group">
-          <label>Amit (HR, GJ, PB, UK, HP Agent Mobile)</label>
-          <input type="text" id="crm-amit" placeholder="+91 99999 99995">
+          <label>Amit Kumar (GJ, DL, HR, PB, UK, Kolkata Agent Mobile)</label>
+          <input type="text" id="crm-amit" placeholder="+91 93151 60881">
+        </div>
+        <div class="input-group">
+          <label>Pavani Avadhutha (AP, Telangana Agent Mobile)</label>
+          <input type="text" id="crm-pavani" placeholder="+91 80765 55914">
         </div>
       </div>
       <button class="btn" style="margin-top: 10px; max-width: 200px;" onclick="saveCRM()">Save Routing Details</button>
@@ -793,6 +797,7 @@
           if (key === 'agent_arpita_phone') document.getElementById('crm-arpita').value = val;
           if (key === 'agent_vinod_phone') document.getElementById('crm-vinod').value = val;
           if (key === 'agent_amit_phone') document.getElementById('crm-amit').value = val;
+          if (key === 'agent_pavani_phone') document.getElementById('crm-pavani').value = val;
 
           // For integration settings
           if (key === 'evolution_default_instance') document.getElementById('setting-instance').value = val;
@@ -811,7 +816,8 @@
         { key: 'agent_danish_phone', value: document.getElementById('crm-danish').value },
         { key: 'agent_arpita_phone', value: document.getElementById('crm-arpita').value },
         { key: 'agent_vinod_phone', value: document.getElementById('crm-vinod').value },
-        { key: 'agent_amit_phone', value: document.getElementById('crm-amit').value }
+        { key: 'agent_amit_phone', value: document.getElementById('crm-amit').value },
+        { key: 'agent_pavani_phone', value: document.getElementById('crm-pavani').value }
       ];
 
       try {
