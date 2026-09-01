@@ -137,6 +137,13 @@ const locales = {
   }
 };
 
+// Helper to get locale dictionary with 100% fallback coverage (guarantees no missing key)
+function getLocaleDict(lang) {
+  const base = locales.English;
+  const target = (lang && locales[lang]) ? locales[lang] : base;
+  return Object.assign({}, base, target);
+}
+
 const AGENTS = {
   gaurav: { id: 'gaurav', name: 'Gaurav Khandelwal', phoneKey: 'agent_gaurav_phone', fallback: '+91 88006 86229' },
   danish: { id: 'danish', name: 'Danish Husain Ansari', phoneKey: 'agent_danish_phone', fallback: '+91 93156 00189' },
@@ -156,7 +163,7 @@ const CATEGORY_MAP = {
   'All Categories': { key: 'catalogue_all_categories', imageKey: 'intro_image_all_categories', label: 'All Categories', fileName: 'Complete_Catalogue.pdf' }
 };
 
-async function getConfigValue(key, defaultValue) {
+async function getConfigValue(key, defaultValue = '') {
   try {
     const { data, error } = await supabase
       .from('bot_config')
@@ -170,7 +177,7 @@ async function getConfigValue(key, defaultValue) {
       }
       return defaultValue;
     }
-    return data.value || defaultValue;
+    return (data && data.value && data.value !== 'undefined' && data.value !== 'null') ? data.value : defaultValue;
   } catch (err) {
     console.error(`Error in getConfigValue for ${key}:`, err);
     return defaultValue;
@@ -211,10 +218,10 @@ async function resolveAgentForState(stateName, districtName = '') {
     agentKey = 'amit';
   }
 
-  if (agentKey) {
+  if (agentKey && AGENTS[agentKey]) {
     const meta = AGENTS[agentKey];
     const phone = await getConfigValue(meta.phoneKey, meta.fallback);
-    return { id: meta.id, name: meta.name, phone: phone };
+    return { id: meta.id, name: meta.name || 'Sales Representative', phone: phone || meta.fallback || '' };
   }
 
   return null;
@@ -222,9 +229,10 @@ async function resolveAgentForState(stateName, districtName = '') {
 
 async function resolvePinCode(pincode) {
   try {
-    const res = await axios.get(`https://api.postalpincode.in/pincode/${pincode.trim()}`, { timeout: 5000 });
-    if (res.data && res.data[0] && res.data[0].Status === 'Success' && res.data[0].PostOffice) {
-      const office = res.data[0].PostOffice[0];
+    if (!pincode) return null;
+    const res = await axios.get(`https://api.postalpincode.in/pincode/${String(pincode).trim()}`, { timeout: 5000 });
+    if (res.data && Array.isArray(res.data) && res.data[0] && res.data[0].Status === 'Success' && Array.isArray(res.data[0].PostOffice) && res.data[0].PostOffice.length > 0) {
+      const office = res.data[0].PostOffice[0] || {};
       return {
         area: office.Name || '',
         city: office.Block || office.District || '',
@@ -240,7 +248,7 @@ async function resolvePinCode(pincode) {
 
 // Clean and normalize mobile number
 function cleanMobileNumber(number) {
-  let cleaned = number.replace(/[\s\-\+\(\)]/g, '');
+  let cleaned = String(number || '').replace(/[\s\-\+\(\)]/g, '');
   if (cleaned.startsWith('91') && cleaned.length > 10) {
     cleaned = cleaned.substring(2);
   }
@@ -450,7 +458,7 @@ app.post('/webhook', async (req, res) => {
     }
 
     const selectedLanguage = stateData.language || 'English';
-    const textDict = locales[selectedLanguage] || locales.English;
+    const textDict = getLocaleDict(selectedLanguage);
 
     // 2. Check global Change Language trigger
     if (messageText === 'global_change_language' || messageText.toLowerCase().includes('change language') || messageText.toLowerCase().includes('भाषा बदलें') || messageText.toLowerCase().includes('மொழி மாற்றம்')) {
@@ -532,7 +540,7 @@ app.post('/webhook', async (req, res) => {
         }
 
         await supabase.from('bot_state').update({ language: lang, current_step: 'REQUIREMENT_TYPE' }).eq('phone_number', phoneNumber);
-        const newDict = locales[lang];
+        const newDict = getLocaleDict(lang);
 
         const sections = [{
           title: lang === 'English' ? 'Options' : 'विकल्प',
@@ -658,7 +666,7 @@ app.post('/webhook', async (req, res) => {
                 assigned_agent_mobile: agent.phone
               }).eq('phone_number', phoneNumber);
 
-              const repText = `${textDict.salesRepIntro}\n\n👤 *Name*: ${agent.name}\n📱 *Mobile*: ${agent.phone}\n📍 *Area*: ${stateData.area || 'N/A'}\n🗺️ *State*: ${stateData.state || 'N/A'}`;
+              const repText = `${textDict.salesRepIntro || ''}\n\n👤 *Name*: ${agent.name || 'Sales Representative'}\n📱 *Mobile*: ${agent.phone || ''}\n📍 *Area*: ${stateData.area || 'N/A'}\n🗺️ *State*: ${stateData.state || 'N/A'}`;
               const buttons = [
                 { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' },
                 { type: 'reply', displayText: '📝 Submit Requirement', id: 'biz_requirement' }
@@ -733,7 +741,7 @@ app.post('/webhook', async (req, res) => {
           catalogue_sent: true
         }).eq('phone_number', phoneNumber);
 
-        const captionText = textDict.catalogueSent.replace('{category}', mapMeta.label);
+        const captionText = (textDict.catalogueSent || locales.English.catalogueSent || '').replace('{category}', mapMeta.label || selectedCat || '');
         
         // 1. Send PDF catalogue file
         if (pdfUrl) {
@@ -818,7 +826,7 @@ app.post('/webhook', async (req, res) => {
                 assigned_agent_mobile: agent.phone
               }).eq('phone_number', phoneNumber);
 
-              const repText = `${textDict.salesRepIntro}\n\n👤 *Name*: ${agent.name}\n📱 *Mobile*: ${agent.phone}\n📍 *Area*: ${stateData.area || 'N/A'}\n🗺️ *State*: ${stateData.state || 'N/A'}`;
+              const repText = `${textDict.salesRepIntro || ''}\n\n👤 *Name*: ${agent.name || 'Sales Representative'}\n📱 *Mobile*: ${agent.phone || ''}\n📍 *Area*: ${stateData.area || 'N/A'}\n🗺️ *State*: ${stateData.state || 'N/A'}`;
               const buttons = [
                 { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' },
                 { type: 'reply', displayText: '📝 Submit Requirement', id: 'biz_requirement' }
@@ -847,17 +855,21 @@ app.post('/webhook', async (req, res) => {
         const resolved = await resolvePinCode(pin);
 
         if (!resolved) {
-          // If public API fails, save PIN only, default agent to Danish
+          // If public API fails, save PIN only, default agent to Delhi
           const defaultAgent = await resolveAgentForState('Delhi');
+          const defaultAgentName = defaultAgent?.name || 'Sales Support';
+          const defaultAgentPhone = defaultAgent?.phone || '+91 93151 60881';
+          const defaultAgentId = defaultAgent?.id || 'amit';
+
           await supabase.from('bot_state').update({ 
             current_step: 'SALES_REP_SHOWN',
             pin_code: pin,
-            assigned_agent_id: defaultAgent.id,
-            assigned_agent_name: defaultAgent.name,
-            assigned_agent_mobile: defaultAgent.phone
+            assigned_agent_id: defaultAgentId,
+            assigned_agent_name: defaultAgentName,
+            assigned_agent_mobile: defaultAgentPhone
           }).eq('phone_number', phoneNumber);
 
-          const repText = `${textDict.salesRepIntro}\n\n👤 *Name*: ${defaultAgent.name}\n📱 *Mobile*: ${defaultAgent.phone}\n📍 *PIN Code*: ${pin}`;
+          const repText = `${textDict.salesRepIntro || ''}\n\n👤 *Name*: ${defaultAgentName}\n📱 *Mobile*: ${defaultAgentPhone}\n📍 *PIN Code*: ${pin || 'N/A'}`;
           const buttons = [
             { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' },
             { type: 'reply', displayText: '📝 Submit Requirement', id: 'biz_requirement' }
@@ -873,16 +885,16 @@ app.post('/webhook', async (req, res) => {
           await supabase.from('bot_state').update({ 
             current_step: 'SALES_REP_SHOWN',
             pin_code: pin,
-            area: resolved.area,
-            city: resolved.city,
-            district: resolved.district,
-            state: resolved.state,
+            area: resolved.area || '',
+            city: resolved.city || '',
+            district: resolved.district || '',
+            state: resolved.state || '',
             assigned_agent_id: agent.id,
             assigned_agent_name: agent.name,
             assigned_agent_mobile: agent.phone
           }).eq('phone_number', phoneNumber);
 
-          const repText = `${textDict.salesRepIntro}\n\n👤 *Name*: ${agent.name}\n📱 *Mobile*: ${agent.phone}\n📍 *Area*: ${resolved.area}\n🗺️ *State*: ${resolved.state}`;
+          const repText = `${textDict.salesRepIntro || ''}\n\n👤 *Name*: ${agent.name || 'Sales Representative'}\n📱 *Mobile*: ${agent.phone || ''}\n📍 *Area*: ${resolved.area || 'N/A'}\n🗺️ *State*: ${resolved.state || 'N/A'}`;
           const buttons = [
             { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' },
             { type: 'reply', displayText: '📝 Submit Requirement', id: 'biz_requirement' }
@@ -893,16 +905,16 @@ app.post('/webhook', async (req, res) => {
           await supabase.from('bot_state').update({ 
             current_step: 'SALES_REP_SHOWN',
             pin_code: pin,
-            area: resolved.area,
-            city: resolved.city,
-            district: resolved.district,
-            state: resolved.state,
+            area: resolved.area || '',
+            city: resolved.city || '',
+            district: resolved.district || '',
+            state: resolved.state || '',
             assigned_agent_id: null,
             assigned_agent_name: 'Unassigned Support',
             assigned_agent_mobile: ''
           }).eq('phone_number', phoneNumber);
 
-          const repText = `${selectedLanguage === 'English' ? '✅ Area resolved successfully. No specific sales representative mapped for this region. Our support team will contact you shortly.' : '✅ क्षेत्र सफलतापूर्वक मिल गया है। इस क्षेत्र के लिए कोई सेल्स एजेंट मैप नहीं है। हमारी टीम जल्द ही आपसे संपर्क करेगी।'}\n\n📍 *PIN Code*: ${pin}\n🗺️ *State*: ${resolved.state}`;
+          const repText = `${selectedLanguage === 'English' ? '✅ Area resolved successfully. No specific sales representative mapped for this region. Our support team will contact you shortly.' : '✅ क्षेत्र सफलतापूर्वक मिल गया है। इस क्षेत्र के लिए कोई सेल्स एजेंट मैप नहीं है। हमारी टीम जल्द ही आपसे संपर्क करेगी।'}\n\n📍 *PIN Code*: ${pin || 'N/A'}\n🗺️ *State*: ${resolved.state || 'N/A'}`;
           const buttons = [
             { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' },
             { type: 'reply', displayText: '📝 Submit Requirement', id: 'biz_requirement' }
@@ -973,10 +985,10 @@ app.post('/webhook', async (req, res) => {
         };
 
         if (resolved) {
-          locationPayload.area = resolved.area;
-          locationPayload.city = resolved.city;
-          locationPayload.district = resolved.district;
-          locationPayload.state = resolved.state;
+          locationPayload.area = resolved.area || '';
+          locationPayload.city = resolved.city || '';
+          locationPayload.district = resolved.district || '';
+          locationPayload.state = resolved.state || '';
         } else {
           locationPayload.area = '';
           locationPayload.city = '';
@@ -1051,18 +1063,18 @@ app.post('/webhook', async (req, res) => {
         }
 
         // 1. Resolve agent
-        const agent = await resolveAgentForState(stateData.state);
+        const agent = await resolveAgentForState(stateData.state, stateData.city || stateData.district);
 
         // 2. Build lead details and insert into Supabase
         const leadPayload = {
-          customer_name: stateData.customer_name,
-          mobile_number: stateData.mobile_number,
-          pin_code: stateData.pin_code,
+          customer_name: stateData.customer_name || 'Valued Customer',
+          mobile_number: stateData.mobile_number || '',
+          pin_code: stateData.pin_code || '',
           area: stateData.area || '',
           city: stateData.city || '',
           district: stateData.district || '',
           state: stateData.state || '',
-          customer_type: stateData.customer_type,
+          customer_type: stateData.customer_type || 'Business',
           interested_category: selectedInterest,
           language: selectedLanguage,
           lead_source: 'WhatsApp Chatbot',
@@ -1083,11 +1095,12 @@ app.post('/webhook', async (req, res) => {
         }
 
         // 3. Send confirmation message
-        let confMessage = textDict.leadConfirmation
-          .replace('{{customer_name}}', stateData.customer_name)
-          .replace('{{mobile}}', stateData.mobile_number)
-          .replace('{{pin_code}}', stateData.pin_code)
-          .replace('{{interested_category}}', selectedInterest);
+        const confTemplate = textDict.leadConfirmation || locales.English.leadConfirmation || '';
+        const confMessage = confTemplate
+          .replace('{{customer_name}}', stateData.customer_name || 'Valued Customer')
+          .replace('{{mobile}}', stateData.mobile_number || 'N/A')
+          .replace('{{pin_code}}', stateData.pin_code || 'N/A')
+          .replace('{{interested_category}}', selectedInterest || 'General Inquiry');
 
         await sendText(phoneNumber, confMessage, instanceName);
 
@@ -1103,7 +1116,7 @@ app.post('/webhook', async (req, res) => {
 
         // 5. Send assigned agent contact details
         if (agent) {
-          const repMsg = `${textDict.salesRepIntro}\n\n👤 *Name*: ${agent.name}\n📱 *Mobile*: ${agent.phone}\n📍 *Area*: ${stateData.area || 'N/A'}\n🗺️ *State*: ${stateData.state || 'N/A'}`;
+          const repMsg = `${textDict.salesRepIntro || ''}\n\n👤 *Name*: ${agent.name || 'Sales Representative'}\n📱 *Mobile*: ${agent.phone || ''}\n📍 *Area*: ${stateData.area || 'N/A'}\n🗺️ *State*: ${stateData.state || 'N/A'}`;
           await sendText(phoneNumber, repMsg, instanceName);
         } else {
           const unassignedMsg = selectedLanguage === 'English' 
