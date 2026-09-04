@@ -145,7 +145,7 @@ function getLocaleDict(lang) {
 }
 
 const AGENTS = {
-  gaurav: { id: 'gaurav', name: 'Gaurav Khandelwal', phoneKey: 'agent_gaurav_phone', fallback: '+91 88006 86229' },
+  gaurav: { id: 'gaurav', name: 'Gaurav Khandelwal', phoneKey: 'agent_gaurav_phone', fallback: '+91 93155 93842' },
   danish: { id: 'danish', name: 'Danish Husain Ansari', phoneKey: 'agent_danish_phone', fallback: '+91 93156 00189' },
   arpita: { id: 'arpita', name: 'Arpita Srivastava', phoneKey: 'agent_arpita_phone', fallback: '+91 93155 96055' },
   vinod: { id: 'vinod', name: 'Vinod Kumar', phoneKey: 'agent_vinod_phone', fallback: '+91 96433 08980' },
