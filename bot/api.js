@@ -5,7 +5,7 @@ const { supabase } = require('./db');
 // Note: When running on the same Render service, the bot can call localhost directly to save external network latency!
 // We fallback to EVOLUTION_API_URL if localhost isn't running or when testing externally.
 const API_URL = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
-const DEFAULT_INSTANCE = process.env.EVOLUTION_DEFAULT_INSTANCE || 'my-bot-3';
+const DEFAULT_INSTANCE = process.env.EVOLUTION_DEFAULT_INSTANCE || 'my-bot-4';
 
 const client = axios.create({
   baseURL: API_URL,

@@ -396,7 +396,7 @@ app.post('/webhook', async (req, res) => {
       processedMessages.delete(messageId);
     }, 10000);
   }
-  const instanceName = req.body.instance || process.env.EVOLUTION_DEFAULT_INSTANCE || 'my-bot-3';
+  const instanceName = req.body.instance || process.env.EVOLUTION_DEFAULT_INSTANCE || 'my-bot-4';
 
   try {
     let { data: stateData, error } = await supabase
