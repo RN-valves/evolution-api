@@ -2,7 +2,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const axios = require('axios');
-const { supabase } = require('./db');
+const { supabase, pgPool } = require('./db');
 const { sendText, sendButtons, sendList, sendMediaUrl } = require('./api');
 
 const app = express();
@@ -259,6 +259,10 @@ function cleanMobileNumber(number) {
 const AUTO_RESPONDER_SUBSTRINGS = [
   'thank you for contacting',
   'thanks for contacting',
+  'thank you for connecting',
+  'thanks for connecting',
+  'thank you for reaching out',
+  'thanks for reaching out',
   'hamse sampark karne',
   'sampark karne ke liye',
   'dhanhyavad',
@@ -308,6 +312,260 @@ function isRateLimitedOrBlocked(phoneNumber) {
   return false;
 }
 
+// ==========================================
+// 1. SAVED CONTACTS & TEAM NUMBERS FILTER
+// ==========================================
+const savedContactsCache = new Set();
+let lastSavedContactsRefresh = 0;
+const SAVED_CONTACTS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Known internal RN team & sales agent phone numbers to never reply to
+const INTERNAL_AGENT_NUMBERS = [
+  '9315593842', // Gaurav
+  '9315600189', // Danish
+  '9315596055', // Arpita
+  '9643308980', // Vinod
+  '9315160881', // Amit
+  '8076555914', // Pavani
+  '9811103377', // RN Valves official
+  '8737029643', // Admin / bot host
+  '9999041935'  // Reserve Bank of India / Gov channel
+];
+
+INTERNAL_AGENT_NUMBERS.forEach(num => savedContactsCache.add(num));
+
+async function refreshSavedContactsCache() {
+  try {
+    if (!pgPool) return;
+
+    const indexJid = (jid) => {
+      if (!jid) return;
+      savedContactsCache.add(jid);
+      const digits = jid.replace(/\D/g, '');
+      if (digits) {
+        savedContactsCache.add(digits);
+        if (digits.length >= 10) savedContactsCache.add(digits.slice(-10));
+      }
+    };
+
+    // 1. Fetch ALL contacts synced from WhatsApp address book (both @s.whatsapp.net and @lid)
+    const contactRows = await pgPool.query('SELECT "remoteJid" FROM "Contact"');
+    for (const row of contactRows.rows) {
+      indexJid(row.remoteJid);
+    }
+
+    // 2. Fetch ALL existing chats (both @s.whatsapp.net and @lid)
+    const chatRows = await pgPool.query('SELECT "remoteJid" FROM "Chat"');
+    for (const row of chatRows.rows) {
+      indexJid(row.remoteJid);
+    }
+
+    // 3. Fetch any custom ignored numbers from bot_config
+    if (supabase) {
+      const { data: configData } = await supabase
+        .from('bot_config')
+        .select('value')
+        .eq('key', 'ignored_phone_numbers')
+        .single();
+
+      if (configData && configData.value) {
+        const customNums = configData.value.split(',').map(s => s.trim().replace(/\D/g, '').slice(-10)).filter(Boolean);
+        customNums.forEach(num => savedContactsCache.add(num));
+      }
+    }
+
+    lastSavedContactsRefresh = Date.now();
+    console.log(`[CacheRefresh] Loaded ${savedContactsCache.size} saved contact/chat identifiers into memory cache.`);
+  } catch (err) {
+    console.error('[CacheRefresh] Error refreshing saved contacts cache:', err.message);
+  }
+}
+
+// Initial cache load
+refreshSavedContactsCache().catch(e => console.error(e));
+
+async function isSavedContact(jid, altJid) {
+  const check = (raw) => {
+    if (!raw) return false;
+    if (savedContactsCache.has(raw)) return true;
+    const digits = raw.replace(/\D/g, '');
+    if (digits) {
+      if (savedContactsCache.has(digits)) return true;
+      const last10 = digits.slice(-10);
+      if (last10 && last10.length === 10 && savedContactsCache.has(last10)) return true;
+    }
+    return false;
+  };
+
+  if (Date.now() - lastSavedContactsRefresh > SAVED_CONTACTS_CACHE_TTL) {
+    await refreshSavedContactsCache();
+  }
+
+  if (check(jid) || check(altJid)) {
+    return true;
+  }
+
+  // Fallback direct DB query if not in cache (e.g. freshly saved contact)
+  if (pgPool) {
+    try {
+      const jidsToCheck = [jid, altJid].filter(Boolean);
+      for (const raw of jidsToCheck) {
+        const digits = raw.replace(/\D/g, '');
+        const last10 = digits.slice(-10);
+        const res = await pgPool.query(
+          'SELECT 1 FROM "Contact" WHERE "remoteJid" = $1 OR "remoteJid" LIKE $2 LIMIT 1',
+          [raw, `%${last10}%`]
+        );
+        if (res.rows.length > 0) {
+          savedContactsCache.add(raw);
+          if (last10) savedContactsCache.add(last10);
+          return true;
+        }
+
+        const chatRes = await pgPool.query(
+          'SELECT 1 FROM "Chat" WHERE "remoteJid" = $1 OR "remoteJid" LIKE $2 LIMIT 1',
+          [raw, `%${last10}%`]
+        );
+        if (chatRes.rows.length > 0) {
+          savedContactsCache.add(raw);
+          if (last10) savedContactsCache.add(last10);
+          return true;
+        }
+      }
+    } catch (e) {
+      // silent fail
+    }
+  }
+
+  return false;
+}
+
+// ====================================================
+// 2. PROMOTIONAL, INFORMATIONAL & SPAM FILTER
+// ====================================================
+function isPromotionalOrInformational(text) {
+  if (!text || typeof text !== 'string') return false;
+  const clean = text.toLowerCase().trim();
+
+  // 1. External URLs/links or domains (unless specifically mentioning rnvalves.com)
+  const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|bit\.ly\/[^\s]+|wa\.me\/[^\s]+|t\.me\/[^\s]+|tinyurl\.com\/[^\s]+)/i;
+  const domainRegex = /\b([a-z0-9\-]+\.(org|in|com|net|gov|edu|co\.in|org\.in|nic\.in|gov\.in))\b/i;
+  if (urlRegex.test(clean) || domainRegex.test(clean)) {
+    if (!clean.includes('rnvalves.com') && !clean.includes('rnvalves')) {
+      return true;
+    }
+  }
+
+  // 2. Promotional, discounts, sales, marketing offers
+  const promoKeywords = [
+    'flat % off', '% off', 'discount', 'exclusive offer', 'special offer', 'limited offer',
+    'bumper offer', 'festive offer', 'festival offer', 'coupon code', 'promo code', 'voucher',
+    'cashback', 'save up to', 'buy 1 get 1', 'buy 2 get 1', 'bogo', 'mega sale', 'flash sale',
+    'clearance sale', 'shop now', 'order now', 'claim your', 'free gift', 'hurry up', 'valid till',
+    'offer valid', 'win cash', 'छूट', 'ऑफर', 'सेल', 'मुफ्त'
+  ];
+  if (promoKeywords.some(kw => clean.includes(kw))) {
+    return true;
+  }
+
+  // 3. OTP, banking, finance, security, account alerts
+  const bankingKeywords = [
+    'otp', 'one time password', 'verification code', 'security code', 'passcode',
+    'debited', 'credited', 'account ending', 'a/c ending', 'acct ending', 'available balance',
+    'credit card', 'debit card', 'pre-approved', 'instant loan', 'loan approved',
+    'emi due', 'statement generated', 'bank alert', 'kyc update', 'rbi kehta hai'
+  ];
+  if (bankingKeywords.some(kw => clean.includes(kw))) {
+    return true;
+  }
+
+  // 4. Logistics, delivery, telecom recharge, utility bills
+  const utilityKeywords = [
+    'out for delivery', 'dispatched', 'tracking link', 'track your order', 'shipment tracking',
+    'awb no', 'waybill', 'delivered by', 'recharge successful', 'data balance', 'daily data',
+    'pack expired', 'recharge now', 'bill due', 'electricity bill', 'gas bill', 'invoice #'
+  ];
+  if (utilityKeywords.some(kw => clean.includes(kw))) {
+    return true;
+  }
+
+  // 5. System opt-out, channels, unsubscribe, announcements
+  const spamKeywords = [
+    'unsubscribe', 'opt out', 'opt-out', 'reply stop', 'to stop receiving', 't&c apply',
+    'terms and conditions apply', 'do not reply', 'auto-generated', 'system generated',
+    'no-reply', 'broadcast message', 'official whatsapp channel', 'whatsapp channel',
+    'official channel', 'guidelines & updates', 'stay informed'
+  ];
+  if (spamKeywords.some(kw => clean.includes(kw))) {
+    return true;
+  }
+
+  return false;
+}
+
+// ==========================================
+// 3. GREETING & WEBSITE INQUIRY DETECTORS
+// ==========================================
+function isCustomerGreeting(text) {
+  if (!text) return false;
+  const clean = text.toLowerCase().trim();
+  
+  const greetingTriggers = [
+    'hi', 'hello', 'hii', 'hiii', 'hey', 'heyy', 'namaste',
+    'good morning', 'good afternoon', 'good evening', 'start',
+    'hlo', 'halo', 'helo', 'namashkar', 'pranam', 'namaste ji',
+    'hi sir', 'hello sir', 'hi rn valves', 'hello rn valves',
+    'hi team', 'hello team', 'hi rn', 'hello rn'
+  ];
+
+  if (greetingTriggers.includes(clean)) return true;
+
+  // Regex matching greetings with exclamation, punctuation or greeting prefixes
+  const greetingRegex = /^(hi+|hello+|hey+|hlo|halo|namaste|namashkar|pranam|good\s+(morning|afternoon|evening)|start)(\s+(sir|ji|rn|rn\s*valves|team))?[!.]*$/i;
+  return greetingRegex.test(clean);
+}
+
+function isWebsiteMessage(text) {
+  if (!text) return false;
+  const clean = text.toLowerCase().trim();
+
+  // 1. Exact default website messages from RN Valves WhatsApp button
+  if (clean.includes('visitor from your website') || clean.includes('chat with you')) {
+    return true;
+  }
+  if (clean.includes('can i get more information about your products')) {
+    return true;
+  }
+  if (clean.includes('website') && (clean.includes('rn valves') || clean.includes('rnvalves') || clean.includes('inquiry') || clean.includes('products'))) {
+    return true;
+  }
+  if (clean.includes('interested in rn valves') || clean.includes('rn valves catalogue')) {
+    return true;
+  }
+
+  return false;
+}
+
+function isExplicitTrigger(text) {
+  if (!text) return false;
+  const clean = text.toLowerCase().trim();
+  return (
+    clean === 'reset' ||
+    clean === 'start' ||
+    clean === 'menu' ||
+    clean === 'main menu' ||
+    clean === 'global_main_menu' ||
+    clean === '🏠 main menu' ||
+    clean === '🏠 मुख्य मेनू' ||
+    clean === 'global_change_language' ||
+    clean.startsWith('lang_') ||
+    clean.startsWith('req_') ||
+    clean.startsWith('biz_') ||
+    clean.startsWith('cat_') ||
+    clean.startsWith('interest_')
+  );
+}
+
 function getIncomingMessage(body) {
   if (body.event !== 'messages.upsert') return null;
   
@@ -318,7 +576,8 @@ function getIncomingMessage(body) {
   // Ignore any chats that are not personal direct messages (groups @g.us, broadcasts, newsletters @newsletter, etc.)
   if (!remoteJid || (!remoteJid.endsWith('@s.whatsapp.net') && !remoteJid.endsWith('@lid'))) return null;
 
-  const phoneNumber = remoteJid;
+  const remoteJidAlt = data.key.remoteJidAlt;
+  const phoneNumber = (remoteJidAlt && remoteJidAlt.endsWith('@s.whatsapp.net')) ? remoteJidAlt : remoteJid;
   const pushName = data.pushName || 'Valued Customer';
   
   let messageText = '';
@@ -348,6 +607,8 @@ function getIncomingMessage(body) {
 
   return {
     phoneNumber,
+    remoteJid,
+    remoteJidAlt,
     pushName,
     messageText: messageText.trim(),
     messageId: data.key.id
@@ -373,7 +634,7 @@ app.post('/webhook', async (req, res) => {
   const incoming = getIncomingMessage(req.body);
   if (!incoming) return;
 
-  const { phoneNumber, pushName, messageText, messageId } = incoming;
+  const { phoneNumber, remoteJid, remoteJidAlt, pushName, messageText, messageId } = incoming;
 
   // 1. Bot check: Ignore common auto-responder signatures
   if (isAutoResponder(messageText)) {
@@ -383,6 +644,19 @@ app.post('/webhook', async (req, res) => {
 
   // 2. Loop/RateLimit check: Prevent infinite bot loops
   if (isRateLimitedOrBlocked(phoneNumber)) {
+    return;
+  }
+
+  // 3. Promotional or Informational message filter: NEVER reply to promotional, informational, bank, OTP, courier, etc.
+  if (isPromotionalOrInformational(messageText)) {
+    console.log(`[PromoFilter] Ignored promotional/informational message from ${phoneNumber}: "${messageText.substring(0, 60)}"`);
+    return;
+  }
+
+  // 4. Saved WhatsApp Contact filter: NEVER reply to contacts already saved in WhatsApp phonebook / CRM
+  const isSaved = await isSavedContact(phoneNumber, remoteJidAlt || remoteJid);
+  if (isSaved) {
+    console.log(`[SavedContactFilter] Ignored message from saved WhatsApp contact: ${phoneNumber} (${pushName})`);
     return;
   }
 
@@ -410,11 +684,39 @@ app.post('/webhook', async (req, res) => {
       return;
     }
 
-    const greetingTriggers = ['hi', 'hello', 'hii', 'hey', 'good morning', 'good afternoon', 'good evening', 'start', 'namaste'];
-    const isGreeting = greetingTriggers.includes(messageText.toLowerCase().trim());
+    const isGreeting = isCustomerGreeting(messageText);
+    const isWebsite = isWebsiteMessage(messageText);
+    const isReset = messageText.toLowerCase() === 'reset';
+    const isExplicit = isExplicitTrigger(messageText);
 
-    // 1. Check if greeting or reset session trigger
-    if (!stateData || isGreeting || messageText.toLowerCase() === 'reset') {
+    // Active steps in ongoing conversations
+    const ACTIVE_STEPS = [
+      'LANGUAGE_SELECTION',
+      'REQUIREMENT_TYPE',
+      'BUSINESS_MENU',
+      'PRODUCT_CATALOGUES',
+      'POST_CATALOGUE',
+      'SALES_PIN_CODE',
+      'FORM_NAME',
+      'FORM_MOBILE',
+      'FORM_PIN_CODE',
+      'FORM_INTEREST'
+    ];
+
+    // Session is active if updated within 2 hours and in an active step
+    const isSessionRecent = stateData && stateData.updated_at && (Date.now() - new Date(stateData.updated_at).getTime() < 2 * 60 * 60 * 1000);
+    const isInActiveFlow = stateData && isSessionRecent && ACTIVE_STEPS.includes(stateData.current_step);
+
+    // CRITICAL USER REQUIREMENT: If not in an active ongoing conversation, ONLY start if message is a greeting or from the website
+    if (!isInActiveFlow) {
+      if (!isGreeting && !isWebsite && !isReset && !isExplicit) {
+        console.log(`[IgnoredNonGreeting] Ignored unsolicited non-greeting message from ${phoneNumber}: "${messageText.substring(0, 60)}"`);
+        return;
+      }
+    }
+
+    // 1. Check if greeting or reset session trigger, or initial entry
+    if (!stateData || !isInActiveFlow || isGreeting || isWebsite || isReset) {
       const initialStep = 'LANGUAGE_SELECTION';
       
       const payload = {
@@ -601,15 +903,10 @@ app.post('/webhook', async (req, res) => {
       }
 
       case 'PERSONAL_USE_END': {
-        if (messageText === 'global_main_menu' || messageText.toLowerCase().trim() === 'main menu' || messageText.trim() === '🏠 Main Menu') {
+        if (messageText === 'global_main_menu' || messageText.toLowerCase().trim() === 'main menu' || messageText.trim() === '🏠 Main Menu' || messageText.trim() === '🏠 मुख्य मेनू' || isCustomerGreeting(messageText) || isWebsiteMessage(messageText)) {
           await triggerMainMenu();
-        } else {
-          await sendText(phoneNumber, textDict.invalidInput, instanceName);
-          const buttons = [
-            { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' }
-          ];
-          await sendButtons(phoneNumber, textDict.personalUse, buttons, 'RN Valves & Faucets', '', instanceName);
         }
+        // If anything else, stay silent - do not spam with invalidInput!
         break;
       }
 
@@ -929,11 +1226,12 @@ app.post('/webhook', async (req, res) => {
         if (messageText === 'biz_requirement' || messageText.toLowerCase().includes('submit') || messageText.toLowerCase().includes('requirement')) action = 'requirement';
 
         if (action === 'requirement') {
-          await supabase.from('bot_state').update({ current_step: 'FORM_NAME' }).eq('phone_number', phoneNumber);
+          await supabase.from('bot_state').update({ current_step: 'FORM_NAME', updated_at: new Date() }).eq('phone_number', phoneNumber);
           await sendText(phoneNumber, textDict.askName, instanceName);
-        } else {
-          await sendText(phoneNumber, textDict.invalidInput, instanceName);
+        } else if (messageText === 'global_main_menu' || messageText.toLowerCase().trim() === 'main menu' || messageText.trim() === '🏠 Main Menu' || messageText.trim() === '🏠 मुख्य मेनू' || isCustomerGreeting(messageText) || isWebsiteMessage(messageText)) {
+          await triggerMainMenu();
         }
+        // If anything else, stay silent - do not spam with invalidInput!
         break;
       }
 
@@ -1125,9 +1423,9 @@ app.post('/webhook', async (req, res) => {
           await sendText(phoneNumber, unassignedMsg, instanceName);
         }
 
-        // 6. Reset current step to main menu and preserve language & verified mobile number
+        // 6. Set current step to COMPLETED and preserve language & verified mobile number
         await supabase.from('bot_state').update({
-          current_step: 'REQUIREMENT_TYPE',
+          current_step: 'COMPLETED',
           customer_type: null,
           customer_name: null,
           pin_code: null,
@@ -1151,8 +1449,32 @@ app.post('/webhook', async (req, res) => {
         break;
       }
 
+      case 'COMPLETED': {
+        const cleanMsg = (messageText || '').toLowerCase().trim();
+        if (
+          messageText === 'global_main_menu' ||
+          cleanMsg === 'main menu' ||
+          cleanMsg === 'menu' ||
+          messageText.includes('Main Menu') ||
+          messageText.includes('मुख्य मेनू') ||
+          isCustomerGreeting(messageText) ||
+          isExplicitTrigger(messageText) ||
+          isWebsiteMessage(messageText)
+        ) {
+          await triggerMainMenu();
+        } else {
+          console.log(`[Flow] Completed conversation for ${phoneNumber}. Ignored casual message: "${messageText}"`);
+        }
+        break;
+      }
+
       default: {
-        await triggerMainMenu();
+        // Only trigger main menu if it looks like a greeting or explicit menu request
+        if (isCustomerGreeting(messageText) || isExplicitTrigger(messageText) || isWebsiteMessage(messageText)) {
+          await triggerMainMenu();
+        } else {
+          console.log(`[Flow] Unrecognized state '${currentState}' for ${phoneNumber}, silent ignore for message: "${messageText}"`);
+        }
         break;
       }
     }

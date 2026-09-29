@@ -600,7 +600,7 @@
 
     <!-- Tab Contents: Global Settings -->
     <div id="tab-settings" class="tab-content">
-      <h3 style="margin-bottom: 24px; font-weight: 600;">Global API Integration Keys</h3>
+      <h3 style="margin-bottom: 24px; font-weight: 600;">Global API Integration Keys & Exclusions</h3>
       <div class="form-grid">
         <div class="input-group">
           <label>WhatsApp Default Instance Name</label>
@@ -609,6 +609,11 @@
         <div class="input-group">
           <label>Evolution API Token / Key</label>
           <input type="text" id="setting-api-key" placeholder="429683C4C977415CAAFCCE10F7D57E11">
+        </div>
+        <div class="input-group" style="grid-column: 1 / -1;">
+          <label>Ignored / Excluded Phone Numbers (Comma-separated, e.g. 9811103377, 9315593842)</label>
+          <input type="text" id="setting-ignored-numbers" placeholder="9811103377, 9315593842, 9315600189">
+          <small style="color: var(--text-secondary); font-size: 11px; margin-top: 5px; display: block;">Numbers added here will NEVER receive any automatic bot replies (staff, personal contacts, vendors).</small>
         </div>
       </div>
       <button class="btn" style="margin-top: 10px; max-width: 200px;" onclick="saveGlobalSettings()">Save Integration Settings</button>
@@ -802,6 +807,7 @@
           // For integration settings
           if (key === 'evolution_default_instance') document.getElementById('setting-instance').value = val;
           if (key === 'evolution_api_key') document.getElementById('setting-api-key').value = val;
+          if (key === 'ignored_phone_numbers') document.getElementById('setting-ignored-numbers').value = val;
         });
       } catch (err) {
         showToast("Error loading configurations: " + err.message, true);
@@ -839,7 +845,8 @@
       
       const settingKeys = [
         { key: 'evolution_default_instance', value: document.getElementById('setting-instance').value },
-        { key: 'evolution_api_key', value: document.getElementById('setting-api-key').value }
+        { key: 'evolution_api_key', value: document.getElementById('setting-api-key').value },
+        { key: 'ignored_phone_numbers', value: document.getElementById('setting-ignored-numbers').value }
       ];
 
       try {
