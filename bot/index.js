@@ -384,7 +384,7 @@ async function refreshSavedContactsCache() {
 // Initial cache load
 refreshSavedContactsCache().catch(e => console.error(e));
 
-async function isSavedContact(jid, altJid) {
+async function isSavedContact(jid, altJid, rawJid) {
   const check = (raw) => {
     if (!raw) return false;
     if (savedContactsCache.has(raw)) return true;
@@ -401,14 +401,14 @@ async function isSavedContact(jid, altJid) {
     await refreshSavedContactsCache();
   }
 
-  if (check(jid) || check(altJid)) {
+  if (check(jid) || check(altJid) || check(rawJid)) {
     return true;
   }
 
   // Fallback direct DB query if not in cache (e.g. freshly saved contact)
   if (pgPool) {
     try {
-      const jidsToCheck = [jid, altJid].filter(Boolean);
+      const jidsToCheck = [jid, altJid, rawJid].filter(Boolean);
       for (const raw of jidsToCheck) {
         const digits = raw.replace(/\D/g, '');
         const last10 = digits.slice(-10);
@@ -441,7 +441,46 @@ async function isSavedContact(jid, altJid) {
 }
 
 // ====================================================
-// 2. PROMOTIONAL, INFORMATIONAL & SPAM FILTER
+// 2. COMPANY / BRAND / TELECOM / BOT SENDER FILTER
+// ====================================================
+function isCompanyOrBotSender(pushName, phoneNumber, remoteJid) {
+  const pName = (pushName || '').toLowerCase().trim();
+  const rawNum = (phoneNumber || remoteJid || '').replace(/\D/g, '');
+
+  // 1. Company, brand, telecom, bank names or automated suffixes in pushName
+  const companyKeywords = [
+    'jio', 'airtel', 'vodafone', 'vi care', 'vi ', 'bsnl', 'mtnl',
+    'facebook', 'meta', 'instagram', 'whatsapp', 'google', 'microsoft', 'apple',
+    'amazon', 'flipkart', 'meesho', 'myntra', 'ajio', 'swiggy', 'zomato',
+    'blinkit', 'zepto', 'bigbasket', 'uber', 'ola', 'rapido', 'delhivery', 'shadowfax', 'blue dart',
+    'bank', 'finance', 'finserv', 'loans', 'loan', 'credit', 'cibil',
+    'paytm', 'phonepe', 'gpay', 'cred', 'navi', 'kreditbee', 'bajaj',
+    'hdfc', 'icici', 'sbi', 'axis', 'kotak', 'pnb', 'idfc', 'rbi', 'reserve bank',
+    'indusind', 'yes bank', 'rbl', 'tata capital', 'kiti', 'customer care',
+    'support', 'helpdesk', 'notifications', 'updates', 'alerts', 'service', 'official'
+  ];
+
+  if (pName && companyKeywords.some(kw => pName.includes(kw))) {
+    return true;
+  }
+
+  // 2. Indian non-mobile format check (Indian numbers: 91 + 10 digits starting with 6, 7, 8, 9)
+  // If an Indian number starts with 91 followed by digits starting with 0-5 (e.g. 1800 toll free, landlines 011, 022, 080)
+  if (rawNum.startsWith('91') && rawNum.length === 12) {
+    const mobileDigits = rawNum.slice(2);
+    if (!/^[6-9]/.test(mobileDigits)) {
+      return true; // Not a regular Indian mobile phone (landline, enterprise toll-free, virtual bot)
+    }
+  } else if (rawNum.startsWith('91') && rawNum.length > 12) {
+    // Toll free or extended IVR / corporate virtual number
+    return true;
+  }
+
+  return false;
+}
+
+// ====================================================
+// 3. PROMOTIONAL, INFORMATIONAL & SPAM FILTER
 // ====================================================
 function isPromotionalOrInformational(text) {
   if (!text || typeof text !== 'string') return false;
@@ -456,40 +495,65 @@ function isPromotionalOrInformational(text) {
     }
   }
 
-  // 2. Promotional, discounts, sales, marketing offers
+  // 2. Telecom & Recharge (Jio, Airtel, Vi, Vodafone, BSNL)
+  const telecomKeywords = [
+    'jio', 'airtel', 'vodafone', 'vi ', 'bsnl', 'mtnl', 'recharge', 'data pack', 'daily data',
+    'validity', 'talktime', 'unlimited call', '5g trial', 'true 5g', 'airtel thanks',
+    'myjio', 'pack expire', 'balance low', 'data balance', 'high-speed data', 'roaming'
+  ];
+  if (telecomKeywords.some(kw => clean.includes(kw))) {
+    return true;
+  }
+
+  // 3. Social Media, Security, Login & OTP (Facebook, Meta, Instagram, etc.)
+  const socialAndOtpKeywords = [
+    'facebook', 'meta', 'instagram', 'whatsapp code', 'security code', 'verification code',
+    'confirmation code', 'login code', 'password reset', 'two-factor', '2fa',
+    'otp', 'one time password', 'passcode', 'secret code', 'do not share', 'valid for',
+    'expires in', 'auth code', 'pin is', 'kiti'
+  ];
+  if (socialAndOtpKeywords.some(kw => clean.includes(kw))) {
+    return true;
+  }
+
+  // 4. Loans, Banking, EMI, Credit Card & Finance
+  const financeKeywords = [
+    'loan', 'personal loan', 'business loan', 'instant loan', 'home loan', 'gold loan',
+    'pre-approved', 'preapproved', 'sanctioned', 'disbursal', 'disbursement', 'cibil',
+    'credit score', 'credit limit', 'credit card', 'debit card', 'debited', 'credited',
+    'account ending', 'a/c ending', 'acct ending', 'available balance', 'emi due',
+    'emi starting', 'interest rate', 'zero processing', 'statement generated',
+    'bank alert', 'kyc update', 'rbi kehta hai', 'finserv', 'tata capital', 'bajaj finance',
+    'collateral free', 'repay'
+  ];
+  if (financeKeywords.some(kw => clean.includes(kw))) {
+    return true;
+  }
+
+  // 5. Promotional, Discounts, Offers, Brand Sales & Marketing
   const promoKeywords = [
     'flat % off', '% off', 'discount', 'exclusive offer', 'special offer', 'limited offer',
     'bumper offer', 'festive offer', 'festival offer', 'coupon code', 'promo code', 'voucher',
     'cashback', 'save up to', 'buy 1 get 1', 'buy 2 get 1', 'bogo', 'mega sale', 'flash sale',
     'clearance sale', 'shop now', 'order now', 'claim your', 'free gift', 'hurry up', 'valid till',
-    'offer valid', 'win cash', 'छूट', 'ऑफर', 'सेल', 'मुफ्त'
+    'offer valid', 'win cash', 'explore now', 'tap here', 'click here', 'exclusive collection',
+    'new arrival', 'new launch', 'deal of the day', 'best price', 'loot', 'छूट', 'ऑफर', 'सेल', 'मुफ्त'
   ];
   if (promoKeywords.some(kw => clean.includes(kw))) {
     return true;
   }
 
-  // 3. OTP, banking, finance, security, account alerts
-  const bankingKeywords = [
-    'otp', 'one time password', 'verification code', 'security code', 'passcode',
-    'debited', 'credited', 'account ending', 'a/c ending', 'acct ending', 'available balance',
-    'credit card', 'debit card', 'pre-approved', 'instant loan', 'loan approved',
-    'emi due', 'statement generated', 'bank alert', 'kyc update', 'rbi kehta hai'
-  ];
-  if (bankingKeywords.some(kw => clean.includes(kw))) {
-    return true;
-  }
-
-  // 4. Logistics, delivery, telecom recharge, utility bills
+  // 6. Logistics, Delivery & Utilities
   const utilityKeywords = [
     'out for delivery', 'dispatched', 'tracking link', 'track your order', 'shipment tracking',
-    'awb no', 'waybill', 'delivered by', 'recharge successful', 'data balance', 'daily data',
-    'pack expired', 'recharge now', 'bill due', 'electricity bill', 'gas bill', 'invoice #'
+    'awb no', 'waybill', 'delivered by', 'order confirmed', 'bill due', 'electricity bill',
+    'gas bill', 'invoice #'
   ];
   if (utilityKeywords.some(kw => clean.includes(kw))) {
     return true;
   }
 
-  // 5. System opt-out, channels, unsubscribe, announcements
+  // 7. System Opt-Out, Channels & Disclaimers
   const spamKeywords = [
     'unsubscribe', 'opt out', 'opt-out', 'reply stop', 'to stop receiving', 't&c apply',
     'terms and conditions apply', 'do not reply', 'auto-generated', 'system generated',
@@ -647,14 +711,20 @@ app.post('/webhook', async (req, res) => {
     return;
   }
 
-  // 3. Promotional or Informational message filter: NEVER reply to promotional, informational, bank, OTP, courier, etc.
+  // 3. Company / Telecom / Brand / Enterprise Sender check: NEVER reply to corporate senders
+  if (isCompanyOrBotSender(pushName, phoneNumber, remoteJidAlt || remoteJid)) {
+    console.log(`[CompanySenderFilter] Ignored message from corporate/bot sender: ${pushName} (${phoneNumber})`);
+    return;
+  }
+
+  // 4. Promotional or Informational message filter: NEVER reply to promotional, informational, bank, OTP, courier, etc.
   if (isPromotionalOrInformational(messageText)) {
     console.log(`[PromoFilter] Ignored promotional/informational message from ${phoneNumber}: "${messageText.substring(0, 60)}"`);
     return;
   }
 
-  // 4. Saved WhatsApp Contact filter: NEVER reply to contacts already saved in WhatsApp phonebook / CRM
-  const isSaved = await isSavedContact(phoneNumber, remoteJidAlt || remoteJid);
+  // 5. Saved WhatsApp Contact filter: NEVER reply to contacts already saved in WhatsApp phonebook / CRM
+  const isSaved = await isSavedContact(phoneNumber, remoteJid, remoteJidAlt);
   if (isSaved) {
     console.log(`[SavedContactFilter] Ignored message from saved WhatsApp contact: ${phoneNumber} (${pushName})`);
     return;
