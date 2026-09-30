@@ -600,8 +600,29 @@ function isExplicitTrigger(text) {
   );
 }
 
+async function logBotAction(key, value) {
+  try {
+    const valStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    if (supabase) {
+      await supabase.from('bot_config').upsert({
+        key,
+        value: valStr,
+        updated_at: new Date()
+      });
+    } else if (pgPool) {
+      await pgPool.query(
+        'INSERT INTO bot_config (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()',
+        [key, valStr]
+      );
+    }
+  } catch (e) {
+    // silent fail
+  }
+}
+
 function getIncomingMessage(body) {
-  if (body.event !== 'messages.upsert') return null;
+  const eventName = (body.event || '').toLowerCase();
+  if (eventName !== 'messages.upsert' && eventName !== 'messages_upsert') return null;
   
   const data = body.data;
   if (!data || !data.key || data.key.fromMe) return null;
@@ -670,26 +691,40 @@ app.post('/webhook', async (req, res) => {
 
   const { phoneNumber, remoteJid, remoteJidAlt, pushName, messageText, messageId } = incoming;
 
+  await logBotAction('bot_last_webhook', {
+    at: new Date().toISOString(),
+    event: req.body?.event,
+    phoneNumber,
+    remoteJid,
+    remoteJidAlt,
+    pushName,
+    messageText
+  });
+
   // 1. Bot check: Ignore common auto-responder signatures
   if (isAutoResponder(messageText)) {
     console.log(`[AutoResponder] Ignored message matching auto-responder signature: "${messageText}" from ${phoneNumber}`);
+    await logBotAction('bot_last_ignored', { at: new Date().toISOString(), phoneNumber, pushName, reason: 'AutoResponder', text: messageText });
     return;
   }
 
   // 2. Loop/RateLimit check: Prevent infinite bot loops
   if (isRateLimitedOrBlocked(phoneNumber)) {
+    await logBotAction('bot_last_ignored', { at: new Date().toISOString(), phoneNumber, pushName, reason: 'RateLimitedOrBlocked' });
     return;
   }
 
   // 3. Company / Telecom / Brand / Enterprise Sender check: NEVER reply to corporate senders
   if (isCompanyOrBotSender(pushName, phoneNumber, remoteJidAlt || remoteJid)) {
     console.log(`[CompanySenderFilter] Ignored message from corporate/bot sender: ${pushName} (${phoneNumber})`);
+    await logBotAction('bot_last_ignored', { at: new Date().toISOString(), phoneNumber, pushName, reason: 'CompanyOrBotSender' });
     return;
   }
 
   // 4. Promotional or Informational message filter: NEVER reply to promotional, informational, bank, OTP, courier, etc.
   if (isPromotionalOrInformational(messageText)) {
     console.log(`[PromoFilter] Ignored promotional/informational message from ${phoneNumber}: "${messageText.substring(0, 60)}"`);
+    await logBotAction('bot_last_ignored', { at: new Date().toISOString(), phoneNumber, pushName, reason: 'PromoFilter', text: messageText });
     return;
   }
 
@@ -697,6 +732,7 @@ app.post('/webhook', async (req, res) => {
   const isSaved = await isSavedContact(phoneNumber, remoteJid, remoteJidAlt);
   if (isSaved) {
     console.log(`[SavedContactFilter] Ignored message from saved WhatsApp contact: ${phoneNumber} (${pushName})`);
+    await logBotAction('bot_last_ignored', { at: new Date().toISOString(), phoneNumber, pushName, reason: 'SavedContact' });
     return;
   }
 
@@ -747,14 +783,6 @@ app.post('/webhook', async (req, res) => {
     const isSessionRecent = stateData && stateData.updated_at && (Date.now() - new Date(stateData.updated_at).getTime() < 2 * 60 * 60 * 1000);
     const isInActiveFlow = stateData && isSessionRecent && ACTIVE_STEPS.includes(stateData.current_step);
 
-    // CRITICAL USER REQUIREMENT: If not in an active ongoing conversation, ONLY start if message is a greeting or from the website
-    if (!isInActiveFlow) {
-      if (!isGreeting && !isWebsite && !isReset && !isExplicit) {
-        console.log(`[IgnoredNonGreeting] Ignored unsolicited non-greeting message from ${phoneNumber}: "${messageText.substring(0, 60)}"`);
-        return;
-      }
-    }
-
     // 1. Check if greeting or reset session trigger, or initial entry
     if (!stateData || !isInActiveFlow || isGreeting || isWebsite || isReset) {
       const initialStep = 'LANGUAGE_SELECTION';
@@ -796,6 +824,7 @@ app.post('/webhook', async (req, res) => {
       }];
 
       await sendList(phoneNumber, locales.English.welcome, 'Select Language', sections, 'RN Valves & Faucets', '', instanceName);
+      await logBotAction('bot_last_reply_sent', { at: new Date().toISOString(), to: phoneNumber, step: 'INITIAL_WELCOME' });
       return;
     }
 
@@ -1535,4 +1564,5 @@ app.post('/webhook', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Chatbot service listening on port ${PORT}`);
+  logBotAction('bot_running_version', `v2.4.2-deploy-${new Date().toISOString()}`);
 });
