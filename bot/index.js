@@ -336,8 +336,6 @@ INTERNAL_AGENT_NUMBERS.forEach(num => savedContactsCache.add(num));
 
 async function refreshSavedContactsCache() {
   try {
-    if (!pgPool) return;
-
     const indexJid = (jid) => {
       if (!jid) return;
       savedContactsCache.add(jid);
@@ -348,19 +346,10 @@ async function refreshSavedContactsCache() {
       }
     };
 
-    // 1. Fetch ALL contacts synced from WhatsApp address book (both @s.whatsapp.net and @lid)
-    const contactRows = await pgPool.query('SELECT "remoteJid" FROM "Contact"');
-    for (const row of contactRows.rows) {
-      indexJid(row.remoteJid);
-    }
+    // Always re-index internal staff & sales agent numbers
+    INTERNAL_AGENT_NUMBERS.forEach(num => indexJid(num));
 
-    // 2. Fetch ALL existing chats (both @s.whatsapp.net and @lid)
-    const chatRows = await pgPool.query('SELECT "remoteJid" FROM "Chat"');
-    for (const row of chatRows.rows) {
-      indexJid(row.remoteJid);
-    }
-
-    // 3. Fetch any custom ignored numbers from bot_config
+    // Fetch custom blacklisted/ignored numbers from bot_config
     if (supabase) {
       const { data: configData } = await supabase
         .from('bot_config')
@@ -370,14 +359,20 @@ async function refreshSavedContactsCache() {
 
       if (configData && configData.value) {
         const customNums = configData.value.split(',').map(s => s.trim().replace(/\D/g, '').slice(-10)).filter(Boolean);
-        customNums.forEach(num => savedContactsCache.add(num));
+        customNums.forEach(num => indexJid(num));
+      }
+    } else if (pgPool) {
+      const res = await pgPool.query("SELECT value FROM bot_config WHERE key = 'ignored_phone_numbers' LIMIT 1");
+      if (res.rows.length > 0 && res.rows[0].value) {
+        const customNums = res.rows[0].value.split(',').map(s => s.trim().replace(/\D/g, '').slice(-10)).filter(Boolean);
+        customNums.forEach(num => indexJid(num));
       }
     }
 
     lastSavedContactsRefresh = Date.now();
-    console.log(`[CacheRefresh] Loaded ${savedContactsCache.size} saved contact/chat identifiers into memory cache.`);
+    console.log(`[CacheRefresh] Loaded ${savedContactsCache.size} internal/ignored numbers into memory cache.`);
   } catch (err) {
-    console.error('[CacheRefresh] Error refreshing saved contacts cache:', err.message);
+    console.error('[CacheRefresh] Error refreshing ignored numbers cache:', err.message);
   }
 }
 
@@ -401,43 +396,7 @@ async function isSavedContact(jid, altJid, rawJid) {
     await refreshSavedContactsCache();
   }
 
-  if (check(jid) || check(altJid) || check(rawJid)) {
-    return true;
-  }
-
-  // Fallback direct DB query if not in cache (e.g. freshly saved contact)
-  if (pgPool) {
-    try {
-      const jidsToCheck = [jid, altJid, rawJid].filter(Boolean);
-      for (const raw of jidsToCheck) {
-        const digits = raw.replace(/\D/g, '');
-        const last10 = digits.slice(-10);
-        const res = await pgPool.query(
-          'SELECT 1 FROM "Contact" WHERE "remoteJid" = $1 OR "remoteJid" LIKE $2 LIMIT 1',
-          [raw, `%${last10}%`]
-        );
-        if (res.rows.length > 0) {
-          savedContactsCache.add(raw);
-          if (last10) savedContactsCache.add(last10);
-          return true;
-        }
-
-        const chatRes = await pgPool.query(
-          'SELECT 1 FROM "Chat" WHERE "remoteJid" = $1 OR "remoteJid" LIKE $2 LIMIT 1',
-          [raw, `%${last10}%`]
-        );
-        if (chatRes.rows.length > 0) {
-          savedContactsCache.add(raw);
-          if (last10) savedContactsCache.add(last10);
-          return true;
-        }
-      }
-    } catch (e) {
-      // silent fail
-    }
-  }
-
-  return false;
+  return (check(jid) || check(altJid) || check(rawJid));
 }
 
 // ====================================================
@@ -445,7 +404,7 @@ async function isSavedContact(jid, altJid, rawJid) {
 // ====================================================
 function isCompanyOrBotSender(pushName, phoneNumber, remoteJid) {
   const pName = (pushName || '').toLowerCase().trim();
-  const rawNum = (phoneNumber || remoteJid || '').replace(/\D/g, '');
+  let rawNum = (phoneNumber || remoteJid || '').replace(/\D/g, '');
 
   // 1. Company, brand, telecom, bank names or automated suffixes in pushName
   const companyKeywords = [
@@ -464,6 +423,11 @@ function isCompanyOrBotSender(pushName, phoneNumber, remoteJid) {
     return true;
   }
 
+  // Normalize double country code: 919199056693 -> 9199056693
+  if (rawNum.startsWith('9191') && rawNum.length === 14) {
+    rawNum = rawNum.slice(2);
+  }
+
   // 2. Indian non-mobile format check (Indian numbers: 91 + 10 digits starting with 6, 7, 8, 9)
   // If an Indian number starts with 91 followed by digits starting with 0-5 (e.g. 1800 toll free, landlines 011, 022, 080)
   if (rawNum.startsWith('91') && rawNum.length === 12) {
@@ -472,8 +436,11 @@ function isCompanyOrBotSender(pushName, phoneNumber, remoteJid) {
       return true; // Not a regular Indian mobile phone (landline, enterprise toll-free, virtual bot)
     }
   } else if (rawNum.startsWith('91') && rawNum.length > 12) {
-    // Toll free or extended IVR / corporate virtual number
-    return true;
+    // Check if the last 10 digits form a valid mobile number (starting with 6-9)
+    const last10 = rawNum.slice(-10);
+    if (!/^[6-9]\d{9}$/.test(last10)) {
+      return true;
+    }
   }
 
   return false;
@@ -579,13 +546,16 @@ function isCustomerGreeting(text) {
     'good morning', 'good afternoon', 'good evening', 'start',
     'hlo', 'halo', 'helo', 'namashkar', 'pranam', 'namaste ji',
     'hi sir', 'hello sir', 'hi rn valves', 'hello rn valves',
-    'hi team', 'hello team', 'hi rn', 'hello rn'
+    'hi team', 'hello team', 'hi rn', 'hello rn',
+    'catalogue', 'catalog', 'price', 'price list', 'rate',
+    'dealer', 'distributor', 'retailer', 'products', 'product',
+    'details', 'enquiry', 'inquiry', 'info', 'order', 'requirement'
   ];
 
   if (greetingTriggers.includes(clean)) return true;
 
   // Regex matching greetings with exclamation, punctuation or greeting prefixes
-  const greetingRegex = /^(hi+|hello+|hey+|hlo|halo|namaste|namashkar|pranam|good\s+(morning|afternoon|evening)|start)(\s+(sir|ji|rn|rn\s*valves|team))?[!.]*$/i;
+  const greetingRegex = /^(hi+|hello+|hey+|hlo|halo|namaste|namashkar|pranam|good\s+(morning|afternoon|evening)|start|catalogue|catalog|price)(\s+(sir|ji|rn|rn\s*valves|team))?[!.]*$/i;
   return greetingRegex.test(clean);
 }
 
