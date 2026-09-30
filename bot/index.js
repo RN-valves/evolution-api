@@ -1562,7 +1562,15 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Chatbot service listening on port ${PORT}`);
   logBotAction('bot_running_version', `v2.4.2-deploy-${new Date().toISOString()}`);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`Chatbot service port ${PORT} is already bound and running.`);
+  } else {
+    console.error('Chatbot service error:', err);
+  }
 });

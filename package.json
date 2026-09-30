@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "build": "tsup",
-    "start": "tsx ./src/main.ts",
+    "start": "concurrently \"node dist/main\" \"node bot/index.js\"",
     "start:prod": "concurrently \"node dist/main\" \"node bot/index.js\"",
     "dev:server": "tsx watch ./src/main.ts",
     "test": "tsx watch ./test/all.test.ts",
