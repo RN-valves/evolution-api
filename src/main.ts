@@ -175,6 +175,10 @@ async function bootstrap() {
           logger.error(`Chatbot process error: ${err.message}`);
         });
         botProc.on('exit', (code: any, signal: any) => {
+          if (code === 42) {
+            logger.info('Chatbot service port 3000 is already active in another process. Supervisor standing by.');
+            return;
+          }
           logger.warn(`Chatbot process exited (code: ${code}, signal: ${signal}). Auto-restarting in 5s...`);
           setTimeout(startChatbotService, 5000);
         });

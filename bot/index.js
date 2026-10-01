@@ -13,7 +13,7 @@ const path = require('path');
 const express = require('express');
 const axios = require('axios');
 const { supabase, pgPool } = require('./db');
-const { sendText, sendButtons, sendList, sendMediaUrl } = require('./api');
+const { sendText, sendButtons, sendList, sendMediaUrl, setSessionApiKey } = require('./api');
 
 const app = express();
 app.use(express.json());
@@ -698,6 +698,9 @@ app.get('/admin/config-creds', (req, res) => {
 
 app.post('/webhook', async (req, res) => {
   res.status(200).send({ status: 'ACK' });
+  if (req.body?.apikey) {
+    setSessionApiKey(req.body.apikey);
+  }
   console.log("WEBHOOK_BODY:", JSON.stringify(req.body));
 
   const incoming = getIncomingMessage(req.body);
@@ -1578,13 +1581,15 @@ app.post('/webhook', async (req, res) => {
 
 const server = app.listen(PORT, () => {
   console.log(`Chatbot service listening on port ${PORT}`);
-  logBotAction('bot_running_version', `v2.4.3-deploy-${new Date().toISOString()}`);
+  logBotAction('bot_running_version', `v2.4.4-deploy-${new Date().toISOString()}`);
 });
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
     console.log(`Chatbot service port ${PORT} is already bound and running.`);
+    process.exit(42);
   } else {
     console.error('Chatbot service error:', err);
+    process.exit(1);
   }
 });

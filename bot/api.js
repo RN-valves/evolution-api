@@ -14,23 +14,50 @@ const client = axios.create({
   }
 });
 
+let currentSessionApiKey = null;
+
+function setSessionApiKey(key) {
+  if (key && typeof key === 'string' && key.trim()) {
+    currentSessionApiKey = key.trim();
+  }
+}
+
 /**
  * Dynamically fetch the API key from the database (or environment variable, or hardcoded fallback)
  */
-async function getApiKey() {
+async function getApiKey(instanceName = DEFAULT_INSTANCE) {
+  if (currentSessionApiKey) {
+    return currentSessionApiKey;
+  }
   try {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('bot_config')
       .select('value')
       .eq('key', 'evolution_api_key')
       .single();
     if (data && data.value && data.value.trim() && data.value.trim() !== 'undefined') {
-      return data.value.trim();
+      currentSessionApiKey = data.value.trim();
+      return currentSessionApiKey;
     }
   } catch (err) {
     // Fallback on error
   }
-  return process.env.AUTHENTICATION_API_KEY || '429683C4C977415CAAFCCE10F7D57E11';
+
+  try {
+    const { data: inst } = await supabase
+      .from('Instance')
+      .select('token')
+      .eq('name', instanceName)
+      .single();
+    if (inst && inst.token) {
+      currentSessionApiKey = inst.token;
+      return inst.token;
+    }
+  } catch (err) {
+    // Fallback on error
+  }
+
+  return process.env.AUTHENTICATION_API_KEY || 'F9121AAD55D7-4F05-B5AC-1BC336FF52FF';
 }
 
 /**
@@ -156,5 +183,6 @@ module.exports = {
   sendText,
   sendButtons,
   sendList,
-  sendMediaUrl
+  sendMediaUrl,
+  setSessionApiKey
 };

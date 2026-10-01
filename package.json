@@ -6,8 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "build": "tsup",
-    "start": "concurrently \"node dist/main\" \"node bot/index.js\"",
-    "start:prod": "concurrently \"node dist/main\" \"node bot/index.js\"",
+    "start": "node dist/main",
+    "start:prod": "node dist/main",
     "dev:server": "tsx watch ./src/main.ts",
     "test": "tsx watch ./test/all.test.ts",
     "lint": "eslint --fix --ext .ts src",
