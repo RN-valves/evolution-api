@@ -21,10 +21,10 @@ import { ROOT_DIR } from '@config/path.config';
 import * as Sentry from '@sentry/node';
 import { ServerUP } from '@utils/server-up';
 import axios from 'axios';
+import { fork } from 'child_process';
 import compression from 'compression';
 import cors from 'cors';
 import express, { json, NextFunction, Request, Response, urlencoded } from 'express';
-import { fork } from 'child_process';
 import { existsSync } from 'fs';
 import { join } from 'path';
 
@@ -161,23 +161,33 @@ async function bootstrap() {
 
   server.listen(httpServer.PORT, () => logger.log(httpServer.TYPE.toUpperCase() + ' - ON: ' + httpServer.PORT));
 
-  // Automatically start RN Valves Chatbot process on port 3000
-  try {
-    const botPath = join(ROOT_DIR, 'bot', 'index.js');
-    if (existsSync(botPath)) {
-      logger.info(`Starting RN Valves Chatbot service from ${botPath}...`);
-      const botProc = fork(botPath, [], {
-        env: { ...process.env, BOT_PORT: process.env.BOT_PORT || '3000' },
-        stdio: 'inherit'
-      });
-      botProc.on('error', (err: any) => logger.error(`Chatbot process error: ${err.message}`));
-      botProc.on('exit', (code: any) => logger.warn(`Chatbot process exited with code: ${code}`));
-    } else {
-      logger.warn(`Chatbot file not found at: ${botPath}`);
+  // Automatically start RN Valves Chatbot process on port 3000 with auto-restart supervisor
+  function startChatbotService() {
+    try {
+      const botPath = join(ROOT_DIR, 'bot', 'index.js');
+      if (existsSync(botPath)) {
+        logger.info(`Starting RN Valves Chatbot service from ${botPath}...`);
+        const botProc = fork(botPath, [], {
+          env: { ...process.env, BOT_PORT: process.env.BOT_PORT || '3000' },
+          stdio: 'inherit',
+        });
+        botProc.on('error', (err: any) => {
+          logger.error(`Chatbot process error: ${err.message}`);
+        });
+        botProc.on('exit', (code: any, signal: any) => {
+          logger.warn(`Chatbot process exited (code: ${code}, signal: ${signal}). Auto-restarting in 5s...`);
+          setTimeout(startChatbotService, 5000);
+        });
+      } else {
+        logger.warn(`Chatbot file not found at: ${botPath}`);
+      }
+    } catch (err: any) {
+      logger.error(`Failed to launch Chatbot service: ${err.message}. Retrying in 5s...`);
+      setTimeout(startChatbotService, 5000);
     }
-  } catch (err: any) {
-    logger.error(`Failed to launch Chatbot service: ${err.message}`);
   }
+
+  startChatbotService();
 
   initWA().catch((error) => {
     logger.error('Error loading instances: ' + error);

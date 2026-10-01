@@ -1,4 +1,14 @@
 require('dotenv').config();
+
+// Global crash protection guards so bot never exits silently
+process.on('uncaughtException', (err) => {
+  console.error('[Bot UncaughtException]:', err?.message || err, err?.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Bot UnhandledRejection]:', reason);
+});
+
 const path = require('path');
 const express = require('express');
 const axios = require('axios');
@@ -671,6 +681,10 @@ function getIncomingMessage(body) {
 }
 
 // UI Views mount on Express
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', service: 'rnvalves-bot', uptime: process.uptime(), timestamp: new Date().toISOString() });
+});
+
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
 });
@@ -1564,7 +1578,7 @@ app.post('/webhook', async (req, res) => {
 
 const server = app.listen(PORT, () => {
   console.log(`Chatbot service listening on port ${PORT}`);
-  logBotAction('bot_running_version', `v2.4.2-deploy-${new Date().toISOString()}`);
+  logBotAction('bot_running_version', `v2.4.3-deploy-${new Date().toISOString()}`);
 });
 
 server.on('error', (err) => {
