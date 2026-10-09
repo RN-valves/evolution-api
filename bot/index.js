@@ -1579,9 +1579,46 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// Automated self-healing webhook synchronization: Ensures Evolution API always routes WhatsApp events to the bot
+async function ensureWebhookRegistered() {
+  if (!pgPool) return;
+  try {
+    const instRes = await pgPool.query('SELECT id, name FROM "Instance"');
+    if (!instRes.rows || instRes.rows.length === 0) return;
+
+    const events = [
+      'APPLICATION_STARTUP', 'QRCODE_UPDATED', 'MESSAGES_SET', 'MESSAGES_UPSERT',
+      'MESSAGES_EDITED', 'MESSAGES_UPDATE', 'MESSAGES_DELETE', 'SEND_MESSAGE',
+      'SEND_MESSAGE_UPDATE', 'CONTACTS_SET', 'CONTACTS_UPSERT', 'CONTACTS_UPDATE',
+      'PRESENCE_UPDATE', 'CHATS_SET', 'CHATS_UPSERT', 'CHATS_UPDATE', 'CHATS_DELETE',
+      'GROUPS_UPSERT', 'GROUP_UPDATE', 'GROUP_PARTICIPANTS_UPDATE', 'CONNECTION_UPDATE',
+      'LABELS_EDIT', 'LABELS_ASSOCIATION', 'CALL'
+    ];
+
+    for (const inst of instRes.rows) {
+      await pgPool.query(`
+        INSERT INTO "Webhook" (id, url, enabled, events, "webhookByEvents", "webhookBase64", "createdAt", "updatedAt", "instanceId", headers)
+        VALUES (
+          $1, 'http://localhost:3000/webhook', true, $2::jsonb, false, false, NOW(), NOW(), $3, '{}'::jsonb
+        )
+        ON CONFLICT ("instanceId") DO UPDATE 
+        SET enabled = true,
+            url = 'http://localhost:3000/webhook',
+            events = $2::jsonb,
+            "updatedAt" = NOW()
+      `, ['wh_' + inst.id.replace(/-/g, '').slice(0, 20), JSON.stringify(events), inst.id]);
+    }
+  } catch (err) {
+    console.error('[AutoHeal] Error ensuring webhook:', err.message);
+  }
+}
+
+ensureWebhookRegistered().catch(() => {});
+setInterval(ensureWebhookRegistered, 30000);
+
 const server = app.listen(PORT, () => {
   console.log(`Chatbot service listening on port ${PORT}`);
-  logBotAction('bot_running_version', `v2.4.4-deploy-${new Date().toISOString()}`);
+  logBotAction('bot_running_version', `v2.4.5-deploy-${new Date().toISOString()}`);
 });
 
 server.on('error', (err) => {
@@ -1593,3 +1630,4 @@ server.on('error', (err) => {
     process.exit(1);
   }
 });
+
