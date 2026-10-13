@@ -1,6 +1,6 @@
 require('dotenv').config();
 const axios = require('axios');
-const { supabase } = require('./db');
+const { supabase, pgPool } = require('./db');
 
 // Note: When running on the same Render service, the bot can call localhost directly to save external network latency!
 // We fallback to EVOLUTION_API_URL if localhost isn't running or when testing externally.
@@ -29,35 +29,54 @@ async function getApiKey(instanceName = DEFAULT_INSTANCE) {
   if (currentSessionApiKey) {
     return currentSessionApiKey;
   }
-  try {
-    const { data } = await supabase
-      .from('bot_config')
-      .select('value')
-      .eq('key', 'evolution_api_key')
-      .single();
-    if (data && data.value && data.value.trim() && data.value.trim() !== 'undefined') {
-      currentSessionApiKey = data.value.trim();
-      return currentSessionApiKey;
-    }
-  } catch (err) {
-    // Fallback on error
+
+  // 1. Direct PostgreSQL query via pgPool (fastest & most reliable)
+  if (pgPool) {
+    try {
+      const confRes = await pgPool.query("SELECT value FROM bot_config WHERE key = 'evolution_api_key' LIMIT 1");
+      if (confRes.rows.length > 0 && confRes.rows[0].value && confRes.rows[0].value.trim() && confRes.rows[0].value.trim() !== 'undefined') {
+        currentSessionApiKey = confRes.rows[0].value.trim();
+        return currentSessionApiKey;
+      }
+    } catch (e) {}
+
+    try {
+      const instRes = await pgPool.query('SELECT token FROM "Instance" WHERE name = $1 LIMIT 1', [instanceName]);
+      if (instRes.rows.length > 0 && instRes.rows[0].token && instRes.rows[0].token.trim()) {
+        currentSessionApiKey = instRes.rows[0].token.trim();
+        return currentSessionApiKey;
+      }
+    } catch (e) {}
   }
 
-  try {
-    const { data: inst } = await supabase
-      .from('Instance')
-      .select('token')
-      .eq('name', instanceName)
-      .single();
-    if (inst && inst.token) {
-      currentSessionApiKey = inst.token;
-      return inst.token;
-    }
-  } catch (err) {
-    // Fallback on error
+  // 2. Supabase query fallback
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from('bot_config')
+        .select('value')
+        .eq('key', 'evolution_api_key')
+        .single();
+      if (data && data.value && data.value.trim() && data.value.trim() !== 'undefined') {
+        currentSessionApiKey = data.value.trim();
+        return currentSessionApiKey;
+      }
+    } catch (err) {}
+
+    try {
+      const { data: inst } = await supabase
+        .from('Instance')
+        .select('token')
+        .eq('name', instanceName)
+        .single();
+      if (inst && inst.token) {
+        currentSessionApiKey = inst.token.trim();
+        return currentSessionApiKey;
+      }
+    } catch (err) {}
   }
 
-  return process.env.AUTHENTICATION_API_KEY || 'F9121AAD55D7-4F05-B5AC-1BC336FF52FF';
+  return process.env.AUTHENTICATION_API_KEY || '429683C4C977415CAAFCCE10F7D57E11';
 }
 
 /**

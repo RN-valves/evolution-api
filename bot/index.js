@@ -175,21 +175,25 @@ const CATEGORY_MAP = {
 
 async function getConfigValue(key, defaultValue = '') {
   try {
-    const { data, error } = await supabase
-      .from('bot_config')
-      .select('value')
-      .eq('key', key)
-      .single();
-
-    if (error) {
-      if (error.code !== 'PGRST116') {
-        console.error(`Error fetching config ${key}:`, error);
+    if (pgPool) {
+      const res = await pgPool.query('SELECT value FROM bot_config WHERE key = $1 LIMIT 1', [key]);
+      if (res.rows.length > 0 && res.rows[0].value && res.rows[0].value !== 'undefined' && res.rows[0].value !== 'null') {
+        return res.rows[0].value;
       }
-      return defaultValue;
     }
-    return (data && data.value && data.value !== 'undefined' && data.value !== 'null') ? data.value : defaultValue;
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('bot_config')
+        .select('value')
+        .eq('key', key)
+        .single();
+
+      if (!error && data && data.value && data.value !== 'undefined' && data.value !== 'null') {
+        return data.value;
+      }
+    }
+    return defaultValue;
   } catch (err) {
-    console.error(`Error in getConfigValue for ${key}:`, err);
     return defaultValue;
   }
 }
@@ -360,7 +364,13 @@ async function refreshSavedContactsCache() {
     INTERNAL_AGENT_NUMBERS.forEach(num => indexJid(num));
 
     // Fetch custom blacklisted/ignored numbers from bot_config
-    if (supabase) {
+    if (pgPool) {
+      const res = await pgPool.query("SELECT value FROM bot_config WHERE key = 'ignored_phone_numbers' LIMIT 1");
+      if (res.rows.length > 0 && res.rows[0].value) {
+        const customNums = res.rows[0].value.split(',').map(s => s.trim().replace(/\D/g, '').slice(-10)).filter(Boolean);
+        customNums.forEach(num => indexJid(num));
+      }
+    } else if (supabase) {
       const { data: configData } = await supabase
         .from('bot_config')
         .select('value')
@@ -369,12 +379,6 @@ async function refreshSavedContactsCache() {
 
       if (configData && configData.value) {
         const customNums = configData.value.split(',').map(s => s.trim().replace(/\D/g, '').slice(-10)).filter(Boolean);
-        customNums.forEach(num => indexJid(num));
-      }
-    } else if (pgPool) {
-      const res = await pgPool.query("SELECT value FROM bot_config WHERE key = 'ignored_phone_numbers' LIMIT 1");
-      if (res.rows.length > 0 && res.rows[0].value) {
-        const customNums = res.rows[0].value.split(',').map(s => s.trim().replace(/\D/g, '').slice(-10)).filter(Boolean);
         customNums.forEach(num => indexJid(num));
       }
     }
@@ -613,21 +617,131 @@ function isExplicitTrigger(text) {
 async function logBotAction(key, value) {
   try {
     const valStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-    if (supabase) {
+    if (pgPool) {
+      await pgPool.query(
+        'INSERT INTO bot_config (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()',
+        [key, valStr]
+      );
+    } else if (supabase) {
       await supabase.from('bot_config').upsert({
         key,
         value: valStr,
         updated_at: new Date()
       });
-    } else if (pgPool) {
-      await pgPool.query(
-        'INSERT INTO bot_config (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()',
-        [key, valStr]
-      );
     }
   } catch (e) {
     // silent fail
   }
+}
+
+// ====================================================
+// Robust Database Abstraction (pgPool direct + Supabase)
+// ====================================================
+async function getBotState(phoneNumber, altJid) {
+  if (pgPool) {
+    try {
+      const res = await pgPool.query(
+        'SELECT * FROM bot_state WHERE phone_number = $1 OR phone_number = $2 ORDER BY updated_at DESC LIMIT 1',
+        [phoneNumber, altJid || phoneNumber]
+      );
+      if (res.rows && res.rows.length > 0) return res.rows[0];
+    } catch (e) {
+      console.error('[DB] getBotState pgPool error:', e.message);
+    }
+  }
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from('bot_state')
+        .select('*')
+        .or(`phone_number.eq.${phoneNumber},phone_number.eq.${altJid || phoneNumber}`)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data) return data;
+    } catch (e) {
+      console.error('[DB] getBotState supabase error:', e.message);
+    }
+  }
+  return null;
+}
+
+async function upsertBotState(payload) {
+  const data = { ...payload, updated_at: new Date() };
+  if (pgPool) {
+    try {
+      const cols = Object.keys(data).map(c => `"${c}"`).join(', ');
+      const placeholders = Object.keys(data).map((_, i) => `${i + 1}`).join(', ');
+      const updateClauses = Object.keys(data)
+        .filter(c => c !== 'phone_number')
+        .map(c => `"${c}" = EXCLUDED."${c}"`)
+        .join(', ');
+      await pgPool.query(
+        `INSERT INTO bot_state (${cols}) VALUES (${placeholders}) ON CONFLICT (phone_number) DO UPDATE SET ${updateClauses}`,
+        Object.values(data)
+      );
+      return;
+    } catch (e) {
+      console.error('[DB] upsertBotState pgPool error:', e.message);
+    }
+  }
+  if (supabase) {
+    try {
+      await supabase.from('bot_state').upsert(data);
+    } catch (e) {
+      console.error('[DB] upsertBotState supabase error:', e.message);
+    }
+  }
+}
+
+async function updateBotState(phoneKey, updates) {
+  const fields = { ...updates, updated_at: new Date() };
+  if (pgPool) {
+    try {
+      const keys = Object.keys(fields);
+      const setClauses = keys.map((k, i) => `"${k}" = ${i + 2}`).join(', ');
+      const values = keys.map(k => fields[k]);
+      await pgPool.query(
+        `UPDATE bot_state SET ${setClauses} WHERE phone_number = $1`,
+        [phoneKey, ...values]
+      );
+      return;
+    } catch (e) {
+      console.error('[DB] updateBotState pgPool error:', e.message);
+    }
+  }
+  if (supabase) {
+    try {
+      await updateBotState(sessionKey, fields).eq('phone_number', phoneKey);
+    } catch (e) {
+      console.error('[DB] updateBotState supabase error:', e.message);
+    }
+  }
+}
+
+async function insertLead(leadData) {
+  if (pgPool) {
+    try {
+      const cols = Object.keys(leadData).map(c => `"${c}"`).join(', ');
+      const placeholders = Object.keys(leadData).map((_, i) => `${i + 1}`).join(', ');
+      const res = await pgPool.query(
+        `INSERT INTO leads (${cols}) VALUES (${placeholders}) RETURNING *`,
+        Object.values(leadData)
+      );
+      if (res.rows && res.rows.length > 0) return res.rows[0];
+    } catch (e) {
+      console.error('[DB] insertLead pgPool error:', e.message);
+    }
+  }
+  if (supabase) {
+    try {
+      const { data } = await supabase.from('leads').insert(leadData).select().single();
+      return data;
+    } catch (e) {
+      console.error('[DB] insertLead supabase error:', e.message);
+    }
+  }
+  return null;
 }
 
 function getIncomingMessage(body) {
@@ -642,7 +756,26 @@ function getIncomingMessage(body) {
   if (!remoteJid || (!remoteJid.endsWith('@s.whatsapp.net') && !remoteJid.endsWith('@lid'))) return null;
 
   const remoteJidAlt = data.key.remoteJidAlt;
-  const phoneNumber = (remoteJidAlt && remoteJidAlt.endsWith('@s.whatsapp.net')) ? remoteJidAlt : remoteJid;
+  const previousRemoteJid = data.key.previousRemoteJid;
+
+  // targetJid is the destination WhatsApp chat JID where replies MUST be sent
+  // If the incoming message came from LID mode, WhatsApp requires replies to be sent to the @lid address!
+  let targetJid = remoteJid;
+  if (previousRemoteJid && previousRemoteJid.endsWith('@lid')) {
+    targetJid = previousRemoteJid;
+  } else if (remoteJid && remoteJid.endsWith('@lid')) {
+    targetJid = remoteJid;
+  } else if (remoteJidAlt && remoteJidAlt.endsWith('@lid')) {
+    targetJid = remoteJidAlt;
+  }
+
+  // phoneNumber is the clean phone number identifier for CRM, leads, and state lookup
+  let phoneNumber = remoteJid;
+  if (remoteJidAlt && remoteJidAlt.endsWith('@s.whatsapp.net')) {
+    phoneNumber = remoteJidAlt;
+  } else if (remoteJid && remoteJid.endsWith('@s.whatsapp.net')) {
+    phoneNumber = remoteJid;
+  }
   const pushName = data.pushName || 'Valued Customer';
   
   let messageText = '';
@@ -671,6 +804,7 @@ function getIncomingMessage(body) {
   }
 
   return {
+    targetJid,
     phoneNumber,
     remoteJid,
     remoteJidAlt,
@@ -706,11 +840,12 @@ app.post('/webhook', async (req, res) => {
   const incoming = getIncomingMessage(req.body);
   if (!incoming) return;
 
-  const { phoneNumber, remoteJid, remoteJidAlt, pushName, messageText, messageId } = incoming;
+  const { targetJid, phoneNumber, remoteJid, remoteJidAlt, pushName, messageText, messageId } = incoming;
 
   await logBotAction('bot_last_webhook', {
     at: new Date().toISOString(),
     event: req.body?.event,
+    targetJid,
     phoneNumber,
     remoteJid,
     remoteJidAlt,
@@ -766,16 +901,9 @@ app.post('/webhook', async (req, res) => {
   const instanceName = req.body.instance || process.env.EVOLUTION_DEFAULT_INSTANCE || 'my-bot-4';
 
   try {
-    let { data: stateData, error } = await supabase
-      .from('bot_state')
-      .select('*')
-      .eq('phone_number', phoneNumber)
-      .single();
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Supabase fetch state error:', error);
-      return;
-    }
+    let stateData = await getBotState(phoneNumber, remoteJid);
+    const sessionKey = stateData?.phone_number || phoneNumber;
+    const replyTo = targetJid || remoteJid || phoneNumber;
 
     const isGreeting = isCustomerGreeting(messageText);
     const isWebsite = isWebsiteMessage(messageText);
@@ -805,7 +933,7 @@ app.post('/webhook', async (req, res) => {
       const initialStep = 'LANGUAGE_SELECTION';
       
       const payload = {
-        phone_number: phoneNumber,
+        phone_number: sessionKey,
         current_step: initialStep,
         language: 'English',
         customer_type: null,
@@ -825,7 +953,7 @@ app.post('/webhook', async (req, res) => {
         updated_at: new Date()
       };
 
-      await supabase.from('bot_state').upsert(payload);
+      await upsertBotState(payload);
 
       // Since there are 6 language buttons, and WhatsApp button templates max is 3, we use sendList
       const sections = [{
@@ -840,7 +968,7 @@ app.post('/webhook', async (req, res) => {
         ]
       }];
 
-      await sendList(phoneNumber, locales.English.welcome, 'Select Language', sections, 'RN Valves & Faucets', '', instanceName);
+      await sendList(replyTo, locales.English.welcome, 'Select Language', sections, 'RN Valves & Faucets', '', instanceName);
       await logBotAction('bot_last_reply_sent', { at: new Date().toISOString(), to: phoneNumber, step: 'INITIAL_WELCOME' });
       return;
     }
@@ -850,7 +978,7 @@ app.post('/webhook', async (req, res) => {
 
     // 2. Check global Change Language trigger
     if (messageText === 'global_change_language' || messageText.toLowerCase().includes('change language') || messageText.toLowerCase().includes('भाषा बदलें') || messageText.toLowerCase().includes('மொழி மாற்றம்')) {
-      await supabase.from('bot_state').update({ current_step: 'LANGUAGE_SELECTION' }).eq('phone_number', phoneNumber);
+      await updateBotState(sessionKey, { current_step: 'LANGUAGE_SELECTION' });
       
       const sections = [{
         title: 'Languages',
@@ -864,13 +992,13 @@ app.post('/webhook', async (req, res) => {
         ]
       }];
 
-      await sendList(phoneNumber, locales.English.welcome, 'Select Language', sections, 'RN Valves & Faucets', '', instanceName);
+      await sendList(replyTo, locales.English.welcome, 'Select Language', sections, 'RN Valves & Faucets', '', instanceName);
       return;
     }
 
     // Helper function to return to Main Menu
     const triggerMainMenu = async () => {
-      await supabase.from('bot_state').update({ current_step: 'REQUIREMENT_TYPE' }).eq('phone_number', phoneNumber);
+      await updateBotState(sessionKey, { current_step: 'REQUIREMENT_TYPE' });
       
       const sections = [{
         title: selectedLanguage === 'English' ? 'Options' : 'विकल्प',
@@ -883,7 +1011,7 @@ app.post('/webhook', async (req, res) => {
         ]
       }];
 
-      await sendList(phoneNumber, textDict.greeting, selectedLanguage === 'English' ? 'Select Type' : 'चयन करें', sections, 'RN Valves', '', instanceName);
+      await sendList(replyTo, textDict.greeting, selectedLanguage === 'English' ? 'Select Type' : 'चयन करें', sections, 'RN Valves', '', instanceName);
     };
 
     // 3. Check global Main Menu trigger
@@ -923,11 +1051,11 @@ app.post('/webhook', async (req, res) => {
               { title: '🔵 Urdu / اردو', rowId: 'lang_Urdu' }
             ]
           }];
-          await sendList(phoneNumber, locales.English.welcome, 'Select Language', sections, 'RN Valves & Faucets', '', instanceName);
+          await sendList(replyTo, locales.English.welcome, 'Select Language', sections, 'RN Valves & Faucets', '', instanceName);
           return;
         }
 
-        await supabase.from('bot_state').update({ language: lang, current_step: 'REQUIREMENT_TYPE' }).eq('phone_number', phoneNumber);
+        await updateBotState(sessionKey, { language: lang, current_step: 'REQUIREMENT_TYPE' });
         const newDict = getLocaleDict(lang);
 
         const sections = [{
@@ -941,7 +1069,7 @@ app.post('/webhook', async (req, res) => {
           ]
         }];
 
-        await sendList(phoneNumber, newDict.greeting, lang === 'English' ? 'Select Type' : 'चयन करें', sections, 'RN Valves', '', instanceName);
+        await sendList(replyTo, newDict.greeting, lang === 'English' ? 'Select Type' : 'चयन करें', sections, 'RN Valves', '', instanceName);
         break;
       }
 
@@ -955,22 +1083,22 @@ app.post('/webhook', async (req, res) => {
 
         if (!type) {
           // Gracefully fallback: show invalid error and repeat options
-          await sendText(phoneNumber, textDict.invalidInput, instanceName);
+          await sendText(replyTo, textDict.invalidInput, instanceName);
           await triggerMainMenu();
           return;
         }
 
-        await supabase.from('bot_state').update({ customer_type: type }).eq('phone_number', phoneNumber);
+        await updateBotState(sessionKey, { customer_type: type });
 
         if (type === 'Personal Use') {
-          await supabase.from('bot_state').update({ current_step: 'PERSONAL_USE_END' }).eq('phone_number', phoneNumber);
+          await updateBotState(sessionKey, { current_step: 'PERSONAL_USE_END' });
           const buttons = [
             { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' }
           ];
-          await sendButtons(phoneNumber, textDict.personalUse, buttons, 'RN Valves & Faucets', '', instanceName);
+          await sendButtons(replyTo, textDict.personalUse, buttons, 'RN Valves & Faucets', '', instanceName);
         } else {
           // Business Customer Flow
-          await supabase.from('bot_state').update({ current_step: 'BUSINESS_MENU' }).eq('phone_number', phoneNumber);
+          await updateBotState(sessionKey, { current_step: 'BUSINESS_MENU' });
           
           const sections = [{
             title: selectedLanguage === 'English' ? 'Business Menu' : 'व्यापार मेनू',
@@ -983,7 +1111,7 @@ app.post('/webhook', async (req, res) => {
             ]
           }];
 
-          await sendList(phoneNumber, textDict.businessMenu, selectedLanguage === 'English' ? 'Select Action' : 'चयन करें', sections, 'RN Valves', '', instanceName);
+          await sendList(replyTo, textDict.businessMenu, selectedLanguage === 'English' ? 'Select Action' : 'चयन करें', sections, 'RN Valves', '', instanceName);
         }
         break;
       }
@@ -1005,7 +1133,7 @@ app.post('/webhook', async (req, res) => {
         else if (messageText === 'biz_requirement' || cleanMsg.includes('submit') || cleanMsg === '4') action = 'requirement';
 
         if (!action) {
-          await sendText(phoneNumber, textDict.invalidInput, instanceName);
+          await sendText(replyTo, textDict.invalidInput, instanceName);
           // Repeat options
           const sections = [{
             title: selectedLanguage === 'English' ? 'Business Menu' : 'व्यापार मेनू',
@@ -1017,12 +1145,12 @@ app.post('/webhook', async (req, res) => {
               { title: '🏠 Main Menu', rowId: 'global_main_menu' }
             ]
           }];
-          await sendList(phoneNumber, textDict.businessMenu, 'Options', sections, 'RN Valves', '', instanceName);
+          await sendList(replyTo, textDict.businessMenu, 'Options', sections, 'RN Valves', '', instanceName);
           return;
         }
 
         if (action === 'catalogues') {
-          await supabase.from('bot_state').update({ current_step: 'PRODUCT_CATALOGUES' }).eq('phone_number', phoneNumber);
+          await updateBotState(sessionKey, { current_step: 'PRODUCT_CATALOGUES' });
           const sections = [{
             title: selectedLanguage === 'English' ? 'Categories' : 'श्रेणियाँ',
             rows: [
@@ -1036,34 +1164,34 @@ app.post('/webhook', async (req, res) => {
               { title: '🏠 Main Menu', rowId: 'global_main_menu' }
             ]
           }];
-          await sendList(phoneNumber, textDict.catalogueMenu, 'Select Category', sections, 'RN Valves', '', instanceName);
+          await sendList(replyTo, textDict.catalogueMenu, 'Select Category', sections, 'RN Valves', '', instanceName);
         } else if (action === 'sales' || action === 'pricing') {
           // If PIN is already known in session, resolve immediately
           if (stateData.pin_code && stateData.pin_code.length === 6) {
             const agent = await resolveAgentForState(stateData.state, stateData.city || stateData.district);
             if (agent) {
-              await supabase.from('bot_state').update({ 
+              await updateBotState(sessionKey, { 
                 current_step: 'SALES_REP_SHOWN',
                 assigned_agent_id: agent.id,
                 assigned_agent_name: agent.name,
                 assigned_agent_mobile: agent.phone
-              }).eq('phone_number', phoneNumber);
+              });
 
               const repText = `${textDict.salesRepIntro || ''}\n\n👤 *Name*: ${agent.name || 'Sales Representative'}\n📱 *Mobile*: ${agent.phone || ''}\n📍 *Area*: ${stateData.area || 'N/A'}\n🗺️ *State*: ${stateData.state || 'N/A'}`;
               const buttons = [
                 { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' },
                 { type: 'reply', displayText: '📝 Submit Requirement', id: 'biz_requirement' }
               ];
-              await sendButtons(phoneNumber, repText, buttons, 'RN Valves & Faucets', '', instanceName);
+              await sendButtons(replyTo, repText, buttons, 'RN Valves & Faucets', '', instanceName);
               return;
             }
           }
           // Request PIN code
-          await supabase.from('bot_state').update({ current_step: 'SALES_PIN_CODE' }).eq('phone_number', phoneNumber);
-          await sendText(phoneNumber, textDict.askPinCode, instanceName);
+          await updateBotState(sessionKey, { current_step: 'SALES_PIN_CODE' });
+          await sendText(replyTo, textDict.askPinCode, instanceName);
         } else if (action === 'requirement') {
-          await supabase.from('bot_state').update({ current_step: 'FORM_NAME' }).eq('phone_number', phoneNumber);
-          await sendText(phoneNumber, textDict.askName, instanceName);
+          await updateBotState(sessionKey, { current_step: 'FORM_NAME' });
+          await sendText(replyTo, textDict.askName, instanceName);
         }
         break;
       }
@@ -1095,7 +1223,7 @@ app.post('/webhook', async (req, res) => {
 
         const mapMeta = CATEGORY_MAP[selectedCat];
         if (!mapMeta) {
-          await sendText(phoneNumber, textDict.invalidInput, instanceName);
+          await sendText(replyTo, textDict.invalidInput, instanceName);
           // Reshow categories
           const sections = [{
             title: 'Categories',
@@ -1110,7 +1238,7 @@ app.post('/webhook', async (req, res) => {
               { title: '🏠 Main Menu', rowId: 'global_main_menu' }
             ]
           }];
-          await sendList(phoneNumber, textDict.catalogueMenu, 'Select Category', sections, 'RN Valves', '', instanceName);
+          await sendList(replyTo, textDict.catalogueMenu, 'Select Category', sections, 'RN Valves', '', instanceName);
           return;
         }
 
@@ -1118,25 +1246,25 @@ app.post('/webhook', async (req, res) => {
         const pdfUrl = await getConfigValue(mapMeta.key, '');
         const imgUrl = await getConfigValue(mapMeta.imageKey, '');
 
-        await supabase.from('bot_state').update({ 
+        await updateBotState(sessionKey, { 
           current_step: 'POST_CATALOGUE',
           interested_category: selectedCat,
           catalogue_sent: true
-        }).eq('phone_number', phoneNumber);
+        });
 
         const captionText = (textDict.catalogueSent || locales.English.catalogueSent || '').replace('{category}', mapMeta.label || selectedCat || '');
         
         // 1. Send PDF catalogue file
         if (pdfUrl) {
-          await sendText(phoneNumber, selectedLanguage === 'English' ? "Sending catalogue PDF..." : "कैटलॉग पीडीएफ भेजी जा रही है...", instanceName);
-          await sendMediaUrl(phoneNumber, pdfUrl, 'document', mapMeta.fileName, captionText, instanceName);
+          await sendText(replyTo, selectedLanguage === 'English' ? "Sending catalogue PDF..." : "कैटलॉग पीडीएफ भेजी जा रही है...", instanceName);
+          await sendMediaUrl(replyTo, pdfUrl, 'document', mapMeta.fileName, captionText, instanceName);
         } else {
-          await sendText(phoneNumber, captionText, instanceName);
+          await sendText(replyTo, captionText, instanceName);
         }
 
         // 2. Send Showcase image optionally if uploaded
         if (imgUrl) {
-          await sendMediaUrl(phoneNumber, imgUrl, 'image', '', captionText, instanceName);
+          await sendMediaUrl(replyTo, imgUrl, 'image', '', captionText, instanceName);
         }
 
         // 3. Send action List options
@@ -1150,7 +1278,7 @@ app.post('/webhook', async (req, res) => {
           ]
         }];
 
-        await sendList(phoneNumber, textDict.postCatalogue, 'Select Option', sections, 'RN Valves', '', instanceName);
+        await sendList(replyTo, textDict.postCatalogue, 'Select Option', sections, 'RN Valves', '', instanceName);
         break;
       }
 
@@ -1167,7 +1295,7 @@ app.post('/webhook', async (req, res) => {
         else if (messageText === 'biz_catalogues' || cleanMsg.includes('other categories') || cleanMsg.includes('view') || cleanMsg === '3') nextAct = 'catalogues';
 
         if (!nextAct) {
-          await sendText(phoneNumber, textDict.invalidInput, instanceName);
+          await sendText(replyTo, textDict.invalidInput, instanceName);
           // Reshow post catalogue actions
           const sections = [{
             title: 'Next Actions',
@@ -1178,12 +1306,12 @@ app.post('/webhook', async (req, res) => {
               { title: '🏠 Main Menu', rowId: 'global_main_menu' }
             ]
           }];
-          await sendList(phoneNumber, textDict.postCatalogue, 'Select Option', sections, 'RN Valves', '', instanceName);
+          await sendList(replyTo, textDict.postCatalogue, 'Select Option', sections, 'RN Valves', '', instanceName);
           return;
         }
 
         if (nextAct === 'catalogues') {
-          await supabase.from('bot_state').update({ current_step: 'PRODUCT_CATALOGUES' }).eq('phone_number', phoneNumber);
+          await updateBotState(sessionKey, { current_step: 'PRODUCT_CATALOGUES' });
           const sections = [{
             title: 'Categories',
             rows: [
@@ -1197,32 +1325,32 @@ app.post('/webhook', async (req, res) => {
               { title: '🏠 Main Menu', rowId: 'global_main_menu' }
             ]
           }];
-          await sendList(phoneNumber, textDict.catalogueMenu, 'Select Category', sections, 'RN Valves', '', instanceName);
+          await sendList(replyTo, textDict.catalogueMenu, 'Select Category', sections, 'RN Valves', '', instanceName);
         } else if (nextAct === 'sales') {
           if (stateData.pin_code && stateData.pin_code.length === 6) {
             const agent = await resolveAgentForState(stateData.state, stateData.city || stateData.district);
             if (agent) {
-              await supabase.from('bot_state').update({ 
+              await updateBotState(sessionKey, { 
                 current_step: 'SALES_REP_SHOWN',
                 assigned_agent_id: agent.id,
                 assigned_agent_name: agent.name,
                 assigned_agent_mobile: agent.phone
-              }).eq('phone_number', phoneNumber);
+              });
 
               const repText = `${textDict.salesRepIntro || ''}\n\n👤 *Name*: ${agent.name || 'Sales Representative'}\n📱 *Mobile*: ${agent.phone || ''}\n📍 *Area*: ${stateData.area || 'N/A'}\n🗺️ *State*: ${stateData.state || 'N/A'}`;
               const buttons = [
                 { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' },
                 { type: 'reply', displayText: '📝 Submit Requirement', id: 'biz_requirement' }
               ];
-              await sendButtons(phoneNumber, repText, buttons, 'RN Valves & Faucets', '', instanceName);
+              await sendButtons(replyTo, repText, buttons, 'RN Valves & Faucets', '', instanceName);
               return;
             }
           }
-          await supabase.from('bot_state').update({ current_step: 'SALES_PIN_CODE' }).eq('phone_number', phoneNumber);
-          await sendText(phoneNumber, textDict.askPinCode, instanceName);
+          await updateBotState(sessionKey, { current_step: 'SALES_PIN_CODE' });
+          await sendText(replyTo, textDict.askPinCode, instanceName);
         } else if (nextAct === 'requirement') {
-          await supabase.from('bot_state').update({ current_step: 'FORM_NAME' }).eq('phone_number', phoneNumber);
-          await sendText(phoneNumber, textDict.askName, instanceName);
+          await updateBotState(sessionKey, { current_step: 'FORM_NAME' });
+          await sendText(replyTo, textDict.askName, instanceName);
         }
         break;
       }
@@ -1230,11 +1358,11 @@ app.post('/webhook', async (req, res) => {
       case 'SALES_PIN_CODE': {
         const pin = messageText.replace(/\s/g, '');
         if (!/^\d{6}$/.test(pin)) {
-          await sendText(phoneNumber, textDict.invalidPinCode, instanceName);
+          await sendText(replyTo, textDict.invalidPinCode, instanceName);
           return;
         }
 
-        await sendText(phoneNumber, selectedLanguage === 'English' ? "Locating your region..." : "आपका क्षेत्र खोजा जा रहा है...", instanceName);
+        await sendText(replyTo, selectedLanguage === 'English' ? "Locating your region..." : "आपका क्षेत्र खोजा जा रहा है...", instanceName);
         const resolved = await resolvePinCode(pin);
 
         if (!resolved) {
@@ -1244,20 +1372,20 @@ app.post('/webhook', async (req, res) => {
           const defaultAgentPhone = defaultAgent?.phone || '+91 93151 60881';
           const defaultAgentId = defaultAgent?.id || 'amit';
 
-          await supabase.from('bot_state').update({ 
+          await updateBotState(sessionKey, { 
             current_step: 'SALES_REP_SHOWN',
             pin_code: pin,
             assigned_agent_id: defaultAgentId,
             assigned_agent_name: defaultAgentName,
             assigned_agent_mobile: defaultAgentPhone
-          }).eq('phone_number', phoneNumber);
+          });
 
           const repText = `${textDict.salesRepIntro || ''}\n\n👤 *Name*: ${defaultAgentName}\n📱 *Mobile*: ${defaultAgentPhone}\n📍 *PIN Code*: ${pin || 'N/A'}`;
           const buttons = [
             { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' },
             { type: 'reply', displayText: '📝 Submit Requirement', id: 'biz_requirement' }
           ];
-          await sendButtons(phoneNumber, repText, buttons, 'RN Valves & Faucets', '', instanceName);
+          await sendButtons(replyTo, repText, buttons, 'RN Valves & Faucets', '', instanceName);
           return;
         }
 
@@ -1265,7 +1393,7 @@ app.post('/webhook', async (req, res) => {
         const agent = await resolveAgentForState(resolved.state, resolved.city || resolved.district);
         
         if (agent) {
-          await supabase.from('bot_state').update({ 
+          await updateBotState(sessionKey, { 
             current_step: 'SALES_REP_SHOWN',
             pin_code: pin,
             area: resolved.area || '',
@@ -1275,17 +1403,17 @@ app.post('/webhook', async (req, res) => {
             assigned_agent_id: agent.id,
             assigned_agent_name: agent.name,
             assigned_agent_mobile: agent.phone
-          }).eq('phone_number', phoneNumber);
+          });
 
           const repText = `${textDict.salesRepIntro || ''}\n\n👤 *Name*: ${agent.name || 'Sales Representative'}\n📱 *Mobile*: ${agent.phone || ''}\n📍 *Area*: ${resolved.area || 'N/A'}\n🗺️ *State*: ${resolved.state || 'N/A'}`;
           const buttons = [
             { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' },
             { type: 'reply', displayText: '📝 Submit Requirement', id: 'biz_requirement' }
           ];
-          await sendButtons(phoneNumber, repText, buttons, 'RN Valves & Faucets', '', instanceName);
+          await sendButtons(replyTo, repText, buttons, 'RN Valves & Faucets', '', instanceName);
         } else {
           // No mapped agent for State
-          await supabase.from('bot_state').update({ 
+          await updateBotState(sessionKey, { 
             current_step: 'SALES_REP_SHOWN',
             pin_code: pin,
             area: resolved.area || '',
@@ -1295,14 +1423,14 @@ app.post('/webhook', async (req, res) => {
             assigned_agent_id: null,
             assigned_agent_name: 'Unassigned Support',
             assigned_agent_mobile: ''
-          }).eq('phone_number', phoneNumber);
+          });
 
           const repText = `${selectedLanguage === 'English' ? '✅ Area resolved successfully. No specific sales representative mapped for this region. Our support team will contact you shortly.' : '✅ क्षेत्र सफलतापूर्वक मिल गया है। इस क्षेत्र के लिए कोई सेल्स एजेंट मैप नहीं है। हमारी टीम जल्द ही आपसे संपर्क करेगी।'}\n\n📍 *PIN Code*: ${pin || 'N/A'}\n🗺️ *State*: ${resolved.state || 'N/A'}`;
           const buttons = [
             { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' },
             { type: 'reply', displayText: '📝 Submit Requirement', id: 'biz_requirement' }
           ];
-          await sendButtons(phoneNumber, repText, buttons, 'RN Valves & Faucets', '', instanceName);
+          await sendButtons(replyTo, repText, buttons, 'RN Valves & Faucets', '', instanceName);
         }
         break;
       }
@@ -1312,8 +1440,8 @@ app.post('/webhook', async (req, res) => {
         if (messageText === 'biz_requirement' || messageText.toLowerCase().includes('submit') || messageText.toLowerCase().includes('requirement')) action = 'requirement';
 
         if (action === 'requirement') {
-          await supabase.from('bot_state').update({ current_step: 'FORM_NAME', updated_at: new Date() }).eq('phone_number', phoneNumber);
-          await sendText(phoneNumber, textDict.askName, instanceName);
+          await updateBotState(sessionKey, { current_step: 'FORM_NAME', updated_at: new Date() });
+          await sendText(replyTo, textDict.askName, instanceName);
         } else if (messageText === 'global_main_menu' || messageText.toLowerCase().trim() === 'main menu' || messageText.trim() === '🏠 Main Menu' || messageText.trim() === '🏠 मुख्य मेनू' || isCustomerGreeting(messageText) || isWebsiteMessage(messageText)) {
           await triggerMainMenu();
         }
@@ -1324,43 +1452,43 @@ app.post('/webhook', async (req, res) => {
       case 'FORM_NAME': {
         // Name validation (only alphabetic characters and spaces allowed)
         if (!/^[a-zA-Z\s]{2,50}$/.test(messageText)) {
-          await sendText(phoneNumber, textDict.invalidName, instanceName);
+          await sendText(replyTo, textDict.invalidName, instanceName);
           return;
         }
 
-        await supabase.from('bot_state').update({ 
+        await updateBotState(sessionKey, { 
           customer_name: messageText,
           current_step: 'FORM_MOBILE'
-        }).eq('phone_number', phoneNumber);
+        });
 
-        await sendText(phoneNumber, textDict.askMobile, instanceName);
+        await sendText(replyTo, textDict.askMobile, instanceName);
         break;
       }
 
       case 'FORM_MOBILE': {
         const cleanedMobile = cleanMobileNumber(messageText);
         if (!/^\d{10}$/.test(cleanedMobile)) {
-          await sendText(phoneNumber, textDict.invalidMobile, instanceName);
+          await sendText(replyTo, textDict.invalidMobile, instanceName);
           return;
         }
 
-        await supabase.from('bot_state').update({ 
+        await updateBotState(sessionKey, { 
           mobile_number: cleanedMobile,
           current_step: 'FORM_PIN_CODE'
-        }).eq('phone_number', phoneNumber);
+        });
 
-        await sendText(phoneNumber, textDict.askPinCode, instanceName);
+        await sendText(replyTo, textDict.askPinCode, instanceName);
         break;
       }
 
       case 'FORM_PIN_CODE': {
         const pin = messageText.replace(/\s/g, '');
         if (!/^\d{6}$/.test(pin)) {
-          await sendText(phoneNumber, textDict.invalidPinCode, instanceName);
+          await sendText(replyTo, textDict.invalidPinCode, instanceName);
           return;
         }
 
-        await sendText(phoneNumber, selectedLanguage === 'English' ? "Locating PIN details..." : "पिन विवरण खोजा जा रहा है...", instanceName);
+        await sendText(replyTo, selectedLanguage === 'English' ? "Locating PIN details..." : "पिन विवरण खोजा जा रहा है...", instanceName);
         const resolved = await resolvePinCode(pin);
 
         const locationPayload = {
@@ -1380,7 +1508,7 @@ app.post('/webhook', async (req, res) => {
           locationPayload.state = '';
         }
 
-        await supabase.from('bot_state').update(locationPayload).eq('phone_number', phoneNumber);
+        await updateBotState(sessionKey, locationPayload);
 
         // Show product interest list
         const sections = [{
@@ -1397,7 +1525,7 @@ app.post('/webhook', async (req, res) => {
           ]
         }];
 
-        await sendList(phoneNumber, textDict.askInterestedCategory, 'Select Category', sections, 'RN Valves', '', instanceName);
+        await sendList(replyTo, textDict.askInterestedCategory, 'Select Category', sections, 'RN Valves', '', instanceName);
         break;
       }
 
@@ -1427,7 +1555,7 @@ app.post('/webhook', async (req, res) => {
         }
 
         if (!selectedInterest || !CATEGORY_MAP[selectedInterest]) {
-          await sendText(phoneNumber, textDict.invalidInput, instanceName);
+          await sendText(replyTo, textDict.invalidInput, instanceName);
           // Reshow list
           const sections = [{
             title: 'Product Interest',
@@ -1442,7 +1570,7 @@ app.post('/webhook', async (req, res) => {
               { title: '🏠 Main Menu', rowId: 'global_main_menu' }
             ]
           }];
-          await sendList(phoneNumber, textDict.askInterestedCategory, 'Select Category', sections, 'RN Valves', '', instanceName);
+          await sendList(replyTo, textDict.askInterestedCategory, 'Select Category', sections, 'RN Valves', '', instanceName);
           return;
         }
 
@@ -1468,15 +1596,7 @@ app.post('/webhook', async (req, res) => {
           status: agent ? 'New' : 'Unassigned'
         };
 
-        const { data: leadData, error: leadError } = await supabase
-          .from('leads')
-          .insert(leadPayload)
-          .select()
-          .single();
-
-        if (leadError) {
-          console.error('Error inserting lead to Supabase:', leadError);
-        }
+        const leadData = await insertLead(leadPayload);
 
         // 3. Send confirmation message
         const confTemplate = textDict.leadConfirmation || locales.English.leadConfirmation || '';
@@ -1486,31 +1606,31 @@ app.post('/webhook', async (req, res) => {
           .replace('{{pin_code}}', stateData.pin_code || 'N/A')
           .replace('{{interested_category}}', selectedInterest || 'General Inquiry');
 
-        await sendText(phoneNumber, confMessage, instanceName);
+        await sendText(replyTo, confMessage, instanceName);
 
         // 4. Send complete catalogue if interested in All Categories
         if (selectedInterest === 'All Categories') {
           const mapMeta = CATEGORY_MAP['All Categories'];
           const pdfUrl = await getConfigValue(mapMeta.key, '');
           if (pdfUrl) {
-            await sendText(phoneNumber, selectedLanguage === 'English' ? "Sending Complete Catalogue..." : "कम्प्लीट कैटलॉग भेजा जा रहा है...", instanceName);
-            await sendMediaUrl(phoneNumber, pdfUrl, 'document', mapMeta.fileName, mapMeta.label, instanceName);
+            await sendText(replyTo, selectedLanguage === 'English' ? "Sending Complete Catalogue..." : "कम्प्लीट कैटलॉग भेजा जा रहा है...", instanceName);
+            await sendMediaUrl(replyTo, pdfUrl, 'document', mapMeta.fileName, mapMeta.label, instanceName);
           }
         }
 
         // 5. Send assigned agent contact details
         if (agent) {
           const repMsg = `${textDict.salesRepIntro || ''}\n\n👤 *Name*: ${agent.name || 'Sales Representative'}\n📱 *Mobile*: ${agent.phone || ''}\n📍 *Area*: ${stateData.area || 'N/A'}\n🗺️ *State*: ${stateData.state || 'N/A'}`;
-          await sendText(phoneNumber, repMsg, instanceName);
+          await sendText(replyTo, repMsg, instanceName);
         } else {
           const unassignedMsg = selectedLanguage === 'English' 
             ? "Our support team will contact you shortly to process your request." 
             : "हमारी सहायता टीम आपके अनुरोध पर कार्रवाई करने के लिए जल्द ही आपसे संपर्क करेगी।";
-          await sendText(phoneNumber, unassignedMsg, instanceName);
+          await sendText(replyTo, unassignedMsg, instanceName);
         }
 
         // 6. Set current step to COMPLETED and preserve language & verified mobile number
-        await supabase.from('bot_state').update({
+        await updateBotState(sessionKey, {
           current_step: 'COMPLETED',
           customer_type: null,
           customer_name: null,
@@ -1525,13 +1645,13 @@ app.post('/webhook', async (req, res) => {
           assigned_agent_name: null,
           assigned_agent_mobile: null,
           lead_id: null
-        }).eq('phone_number', phoneNumber);
+        });
 
         // Send Main Menu button prompt
         const buttons = [
           { type: 'reply', displayText: '🏠 Main Menu', id: 'global_main_menu' }
         ];
-        await sendButtons(phoneNumber, textDict.mainMenuText, buttons, 'RN Valves & Faucets', '', instanceName);
+        await sendButtons(replyTo, textDict.mainMenuText, buttons, 'RN Valves & Faucets', '', instanceName);
         break;
       }
 
@@ -1567,15 +1687,7 @@ app.post('/webhook', async (req, res) => {
 
   } catch (err) {
     console.error('Fatal chatbot handler error:', err);
-    try {
-      await supabase.from('bot_config').upsert({
-        key: 'bot_last_error',
-        value: `${err.message}\n${err.stack}\nResponse: ${JSON.stringify(err.response?.data || {})}`,
-        updated_at: new Date()
-      });
-    } catch (e) {
-      console.error('Failed to log error to database:', e);
-    }
+    await logBotAction('bot_last_error', `${err.message}\n${err.stack}\nResponse: ${JSON.stringify(err.response?.data || {})}`);
   }
 });
 
@@ -1618,7 +1730,7 @@ setInterval(ensureWebhookRegistered, 30000);
 
 const server = app.listen(PORT, () => {
   console.log(`Chatbot service listening on port ${PORT}`);
-  logBotAction('bot_running_version', `v2.4.5-deploy-${new Date().toISOString()}`);
+  logBotAction('bot_running_version', `v2.4.6-deploy-${new Date().toISOString()}`);
 });
 
 server.on('error', (err) => {
