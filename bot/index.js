@@ -343,7 +343,8 @@ const INTERNAL_AGENT_NUMBERS = [
   '8076555914', // Pavani
   '9811103377', // RN Valves official
   '8737029643', // Admin / bot host
-  '9999041935'  // Reserve Bank of India / Gov channel
+  '9999041935', // Reserve Bank of India / Gov channel
+  '9999422203'  // RN previous / alternate number
 ];
 
 INTERNAL_AGENT_NUMBERS.forEach(num => savedContactsCache.add(num));
@@ -898,7 +899,15 @@ app.post('/webhook', async (req, res) => {
       processedMessages.delete(messageId);
     }, 10000);
   }
-  const instanceName = req.body.instance || process.env.EVOLUTION_DEFAULT_INSTANCE || 'my-bot-4';
+  const activeInstance = process.env.EVOLUTION_DEFAULT_INSTANCE || 'my-bot-4';
+  const incomingInstance = req.body.instance;
+
+  // Strict Instance Isolation: Only accept webhooks belonging to the active scanned bot instance
+  if (incomingInstance && incomingInstance !== activeInstance) {
+    console.log(`[InstanceGuard] Ignored webhook from non-active instance '${incomingInstance}' (Only '${activeInstance}' is active).`);
+    return;
+  }
+  const instanceName = activeInstance;
 
   try {
     let stateData = await getBotState(phoneNumber, remoteJid);
@@ -1691,13 +1700,15 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Automated self-healing webhook synchronization: Ensures Evolution API always routes WhatsApp events to the bot
+// Automated self-healing webhook synchronization: Ensures Evolution API only routes active instance events to the bot
 async function ensureWebhookRegistered() {
   if (!pgPool) return;
   try {
-    const instRes = await pgPool.query('SELECT id, name FROM "Instance"');
+    const activeInstance = process.env.EVOLUTION_DEFAULT_INSTANCE || 'my-bot-4';
+    const instRes = await pgPool.query('SELECT id, name FROM "Instance" WHERE name = $1 LIMIT 1', [activeInstance]);
     if (!instRes.rows || instRes.rows.length === 0) return;
 
+    const activeInst = instRes.rows[0];
     const events = [
       'APPLICATION_STARTUP', 'QRCODE_UPDATED', 'MESSAGES_SET', 'MESSAGES_UPSERT',
       'MESSAGES_EDITED', 'MESSAGES_UPDATE', 'MESSAGES_DELETE', 'SEND_MESSAGE',
@@ -1707,19 +1718,23 @@ async function ensureWebhookRegistered() {
       'LABELS_EDIT', 'LABELS_ASSOCIATION', 'CALL'
     ];
 
-    for (const inst of instRes.rows) {
-      await pgPool.query(`
-        INSERT INTO "Webhook" (id, url, enabled, events, "webhookByEvents", "webhookBase64", "createdAt", "updatedAt", "instanceId", headers)
-        VALUES (
-          $1, 'http://localhost:3000/webhook', true, $2::jsonb, false, false, NOW(), NOW(), $3, '{}'::jsonb
-        )
-        ON CONFLICT ("instanceId") DO UPDATE 
-        SET enabled = true,
-            url = 'http://localhost:3000/webhook',
-            events = $2::jsonb,
-            "updatedAt" = NOW()
-      `, ['wh_' + inst.id.replace(/-/g, '').slice(0, 20), JSON.stringify(events), inst.id]);
-    }
+    await pgPool.query(`
+      INSERT INTO "Webhook" (id, url, enabled, events, "webhookByEvents", "webhookBase64", "createdAt", "updatedAt", "instanceId", headers)
+      VALUES (
+        $1, 'http://localhost:3000/webhook', true, $2::jsonb, false, false, NOW(), NOW(), $3, '{}'::jsonb
+      )
+      ON CONFLICT ("instanceId") DO UPDATE 
+      SET enabled = true,
+          url = 'http://localhost:3000/webhook',
+          events = $2::jsonb,
+          "updatedAt" = NOW()
+    `, ['wh_' + activeInst.id.replace(/-/g, '').slice(0, 20), JSON.stringify(events), activeInst.id]);
+
+    // Ensure any other old/stale instance webhooks are disabled so they can never send bot replies
+    await pgPool.query(`
+      UPDATE "Webhook" SET enabled = false WHERE "instanceId" != $1
+    `, [activeInst.id]);
+
   } catch (err) {
     console.error('[AutoHeal] Error ensuring webhook:', err.message);
   }

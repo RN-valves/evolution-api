@@ -88,7 +88,7 @@ async function sendText(number, text, instanceName = DEFAULT_INSTANCE) {
     let cleanText = typeof text === 'string' ? text.trim() : String(text || '').trim();
     if (!cleanText || cleanText === 'undefined' || cleanText === 'null') return null;
 
-    const apikey = await getApiKey();
+    const apikey = await getApiKey(instanceName);
     const response = await client.post(`/message/sendText/${instanceName}`, {
       number,
       text: cleanText
