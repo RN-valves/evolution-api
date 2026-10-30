@@ -1475,8 +1475,8 @@ export class BaileysStartupService extends ChannelStartupService {
           this.logger.verbose(messageRaw);
 
           sendTelemetry(`received.message.${messageRaw.messageType ?? 'unknown'}`);
-          if (messageRaw.key.remoteJid?.includes('@lid') && messageRaw.key.remoteJidAlt) {
-            messageRaw.key.remoteJid = messageRaw.key.remoteJidAlt;
+          if (messageRaw.key.remoteJid?.includes('@lid')) {
+            (messageRaw.key as any).lid = messageRaw.key.remoteJid;
           }
           console.log(messageRaw);
 
@@ -3573,8 +3573,9 @@ export class BaileysStartupService extends ChannelStartupService {
 
         if (cached) {
           this.logger.verbose(`Number ${user.number} found in cache`);
+          const targetJid = user.jid?.includes('@lid') ? user.jid : cached.remoteJid;
           return new OnWhatsAppDto(
-            cached.remoteJid,
+            targetJid,
             true,
             user.number,
             contacts.find((c) => c.remoteJid === cached.remoteJid)?.pushName,

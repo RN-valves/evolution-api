@@ -758,11 +758,14 @@ function getIncomingMessage(body) {
 
   const remoteJidAlt = data.key.remoteJidAlt;
   const previousRemoteJid = data.key.previousRemoteJid;
+  const keyLid = data.key.lid;
 
   // targetJid is the destination WhatsApp chat JID where replies MUST be sent
   // If the incoming message came from LID mode, WhatsApp requires replies to be sent to the @lid address!
   let targetJid = remoteJid;
-  if (previousRemoteJid && previousRemoteJid.endsWith('@lid')) {
+  if (keyLid && keyLid.endsWith('@lid')) {
+    targetJid = keyLid;
+  } else if (previousRemoteJid && previousRemoteJid.endsWith('@lid')) {
     targetJid = previousRemoteJid;
   } else if (remoteJid && remoteJid.endsWith('@lid')) {
     targetJid = remoteJid;
@@ -841,7 +844,26 @@ app.post('/webhook', async (req, res) => {
   const incoming = getIncomingMessage(req.body);
   if (!incoming) return;
 
-  const { targetJid, phoneNumber, remoteJid, remoteJidAlt, pushName, messageText, messageId } = incoming;
+  let { targetJid, phoneNumber, remoteJid, remoteJidAlt, pushName, messageText, messageId } = incoming;
+
+  // Database fallback: If targetJid is still @s.whatsapp.net, check if this user has an active @lid session in Message table!
+  if (!targetJid.endsWith('@lid') && pgPool) {
+    try {
+      const lidRes = await pgPool.query(
+        `SELECT "key"->>'remoteJid' as lid FROM "Message" 
+         WHERE ("key"->>'remoteJidAlt' = $1 OR "key"->>'remoteJid' = $1) 
+           AND "key"->>'remoteJid' LIKE '%@lid' 
+         ORDER BY 1 DESC LIMIT 1`,
+        [phoneNumber]
+      );
+      if (lidRes.rows.length > 0 && lidRes.rows[0].lid) {
+        targetJid = lidRes.rows[0].lid;
+        console.log(`[LID Resolver] Resolved ${phoneNumber} to active WhatsApp LID: ${targetJid}`);
+      }
+    } catch (e) {
+      console.error('[LID Resolver Error]:', e.message);
+    }
+  }
 
   await logBotAction('bot_last_webhook', {
     at: new Date().toISOString(),
@@ -1745,7 +1767,7 @@ setInterval(ensureWebhookRegistered, 30000);
 
 const server = app.listen(PORT, () => {
   console.log(`Chatbot service listening on port ${PORT}`);
-  logBotAction('bot_running_version', `v2.4.6-deploy-${new Date().toISOString()}`);
+  logBotAction('bot_running_version', `v2.4.7-deploy-${new Date().toISOString()}`);
 });
 
 server.on('error', (err) => {
